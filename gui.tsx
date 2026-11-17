@@ -11,10 +11,13 @@ import {
   effortLadder,
   energyFor,
   fillBackgroundFor,
+  idsFromVariants,
   isDefaultLevel,
   isOffLevel,
+  matchModelFromLabels,
   normalizeEffortId,
   orderVariants,
+  pickListedModel,
   PARTICLES,
   particleCountFor,
   pctFromIndex,
@@ -177,7 +180,7 @@ function ladderFor(node: Element, fallback: string[]) {
 }
 
 function paintNativeEffort(variants: string[], current?: string) {
-  const fallback = variants.length ? effortLadder(variants) : ["default", "low", "medium", "high", "xhigh", "max"]
+  const fallback = effortLadder(variants)
   const keep = new Set<Element>()
   const send = findSendButton()
   const buttons = Array.from(document.querySelectorAll("button,[role='button']"))
@@ -317,40 +320,43 @@ function scrapeEffortLabel(composer = findVisibleComposer()) {
   return undefined
 }
 
-function scrapeModel(models: any[], composer = findVisibleComposer()) {
-  const controls = composer?.querySelector("[data-slot='composer-controls']")
-  if (!controls || models.length === 0) return undefined
-  for (const button of actionButtons(controls)) {
-    const text = effortText(button)
-    if (!text || EFFORT_RE.test(text)) continue
-    const lower = text.toLowerCase()
-    const exact = models.find((item) => String(item?.name ?? "").toLowerCase() === lower)
-    if (exact) return exact
-    const loose = models.find((item) => {
-      const name = String(item?.name ?? "").toLowerCase()
-      return name && (name.includes(lower) || lower.includes(name))
-    })
-    if (loose) return loose
+function scrapeControlLabels(composer = findVisibleComposer()) {
+  const roots = [
+    composer?.querySelector("[data-slot='composer-controls']"),
+    composer,
+  ].filter(Boolean) as Element[]
+  const labels: string[] = []
+  const seen = new Set<string>()
+  for (const root of roots) {
+    for (const button of actionButtons(root)) {
+      const text = effortText(button)
+      if (!text || seen.has(text)) continue
+      seen.add(text)
+      labels.push(text)
+    }
   }
-  return undefined
+  return labels
 }
 
-async function loadModelCatalog(client: any, directory?: string) {
+async function loadModelList(client: any, directory?: string) {
   const query = directory ? { location: { directory } } : undefined
-  const listed = unwrapList(await client.model.list(query))
-  let selected: any
-  try {
-    const fallback = await client.model.default(query)
-    selected = fallback?.data ?? fallback
-    if (selected && Array.isArray(selected)) selected = undefined
-  } catch {
-    selected = undefined
-  }
-  return { listed, selected }
+  return unwrapList(await client.model.list(query))
+}
+
+function resolveListedModel(listed: any[], selected?: { providerID?: string; modelID?: string; id?: string }) {
+  const matched = pickListedModel(listed, selected)
+  if (matched) return matched
+  if (selected?.modelID) return undefined
+  return matchModelFromLabels(listed, scrapeControlLabels())
 }
 
 function variantIds(model: any) {
-  return orderVariants((model?.variants ?? []).map((variant: Variant) => variant.id))
+  return idsFromVariants(model?.variants)
+}
+
+function selectionKey(selected?: { providerID?: string; modelID?: string }) {
+  if (!selected?.modelID) return ""
+  return `${selected.providerID || ""}::${selected.modelID}`
 }
 
 const UNSET = Symbol("oces-pending-unset")
@@ -361,6 +367,7 @@ function Slider(props: { context: any }) {
   const [dragging, setDragging] = createSignal(false)
   const [pending, setPending] = createSignal<string | undefined | typeof UNSET>(UNSET)
   const [nonce, setNonce] = createSignal(0)
+  const [boundKey, setBoundKey] = createSignal("")
   let track: HTMLDivElement | undefined
 
   const session = () => props.context.sessions.current()
@@ -380,27 +387,14 @@ function Slider(props: { context: any }) {
     let cancelled = false
     void (async () => {
       try {
-        const { listed, selected: fallback } = await loadModelCatalog(props.context.client, directory)
+        const listed = await loadModelList(props.context.client, directory)
         if (cancelled) return
-        const scraped = scrapeModel(listed)
-        const found =
-          listed.find(
-            (item: any) =>
-              selected?.providerID &&
-              item?.providerID === selected.providerID &&
-              (item?.id === selected.modelID || item?.modelID === selected.modelID),
-          ) ??
-          listed.find(
-            (item: any) =>
-              fallback &&
-              item?.providerID === fallback.providerID &&
-              (item?.id === fallback.modelID || item?.modelID === fallback.modelID || item?.id === fallback.id),
-          ) ??
-          scraped ??
-          fallback
-        if (!cancelled) setVariants(variantIds(found))
+        const found = resolveListedModel(listed, selected)
+        const next = variantIds(found)
+        setVariants((prev) => (prev.join("\0") === next.join("\0") ? prev : next))
+        setBoundKey(selectionKey(selected) || (found ? `${found.providerID || ""}::${found.id || found.modelID || ""}` : ""))
       } catch {
-        if (!cancelled && variants().length === 0) setVariants([])
+        if (!cancelled && !boundKey()) setVariants([])
       }
     })()
     onCleanup(() => {
@@ -410,8 +404,9 @@ function Slider(props: { context: any }) {
 
   onMount(() => {
     const timer = window.setInterval(() => {
-      if (!session() || variants().length === 0) setNonce((value) => value + 1)
-    }, 800)
+      const key = selectionKey(model())
+      if (key !== boundKey() || variants().length === 0) setNonce((value) => value + 1)
+    }, 600)
     onCleanup(() => window.clearInterval(timer))
   })
 
@@ -632,24 +627,11 @@ export default Plugin.define({
       const session = ctx.sessions.current()
       const model = ctx.screen.current()?.composer.model()
       try {
-        const { listed, selected } = await loadModelCatalog(ctx.client, session?.directory)
-        const found =
-          listed.find(
-            (item: any) =>
-              model?.providerID &&
-              item?.providerID === model.providerID &&
-              (item?.id === model.modelID || item?.modelID === model.modelID),
-          ) ??
-          listed.find(
-            (item: any) =>
-              selected &&
-              item?.providerID === selected.providerID &&
-              (item?.id === selected.modelID || item?.modelID === selected.modelID || item?.id === selected.id),
-          ) ??
-          scrapeModel(listed)
+        const listed = await loadModelList(ctx.client, session?.directory)
+        const found = resolveListedModel(listed, model)
         return {
           model,
-          variants: effortLadder(variantIds(found ?? selected)),
+          variants: effortLadder(variantIds(found)),
         }
       } catch {
         return { model, variants: [] as string[] }

@@ -126,6 +126,86 @@ export function effortLadder(ids) {
   return ["default", ...ordered]
 }
 
+export function idsFromVariants(raw) {
+  if (raw == null) return []
+  if (Array.isArray(raw)) {
+    return orderVariants(
+      raw
+        .map((item) => {
+          if (item == null || item === "") return ""
+          if (typeof item === "string") return item
+          return String(item.id ?? item.variant ?? "")
+        })
+        .filter((id) => id && !isDefaultLevel(id)),
+    )
+  }
+  if (typeof raw === "object") {
+    return orderVariants(Object.keys(raw).filter((id) => id && !isDefaultLevel(id)))
+  }
+  return []
+}
+
+function identityIds(item, keys) {
+  if (!item) return []
+  return keys.map((key) => item[key]).filter((value) => value != null && value !== "").map(String)
+}
+
+export function modelMatches(item, selected) {
+  if (!item || !selected) return false
+  const modelIDs = identityIds(item, ["id", "modelID"])
+  const selectedIDs = identityIds(selected, ["id", "modelID"])
+  if (modelIDs.length === 0 || selectedIDs.length === 0) return false
+  if (!modelIDs.some((id) => selectedIDs.includes(id))) return false
+  const providers = identityIds(item, ["providerID", "canonical"])
+  const selectedProviders = identityIds(selected, ["providerID", "canonical"])
+  if (providers.length === 0 || selectedProviders.length === 0) return true
+  return providers.some((id) => selectedProviders.includes(id))
+}
+
+export function pickListedModel(list, selected) {
+  if (!Array.isArray(list) || !selected) return undefined
+  return list.find((item) => modelMatches(item, selected))
+}
+
+export function matchModelByLabel(list, label) {
+  const text = String(label ?? "")
+    .trim()
+    .toLowerCase()
+    .replace(/…$|\.{2,}$/g, "")
+  if (!text || !Array.isArray(list)) return undefined
+  const exact = list.filter((item) => String(item?.name ?? "").toLowerCase() === text)
+  if (exact.length === 1) return exact[0]
+  const byId = list.filter((item) => identityIds(item, ["id", "modelID"]).some((id) => id.toLowerCase() === text))
+  if (byId.length === 1) return byId[0]
+  const prefixed = list.filter((item) => {
+    const name = String(item?.name ?? "").toLowerCase()
+    if (!name) return false
+    return name.startsWith(text) || (text.startsWith(name) && name.length >= 10)
+  })
+  if (prefixed.length === 1) return prefixed[0]
+  const contained = list.filter((item) => {
+    const name = String(item?.name ?? "").toLowerCase()
+    return name.length >= 6 && text.includes(name)
+  })
+  if (contained.length === 1) return contained[0]
+  return undefined
+}
+
+export function matchModelFromLabels(list, labels) {
+  if (!Array.isArray(list) || !Array.isArray(labels)) return undefined
+  const hits = []
+  const seen = new Set()
+  for (const label of labels) {
+    const found = matchModelByLabel(list, label)
+    if (!found) continue
+    const key = `${found.providerID || ""}::${found.id || found.modelID || ""}`
+    if (seen.has(key)) continue
+    seen.add(key)
+    hits.push(found)
+  }
+  return hits.length === 1 ? hits[0] : undefined
+}
+
 export function rankOf(id) {
   const key = String(id ?? "")
     .trim()

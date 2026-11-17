@@ -15,7 +15,7 @@ the native thinking-intensity control):
 - Continuous drag with detent; release snaps to a level, including **Default**
 - Low stays blue; higher levels shift violet, with right-to-left star particles
 - Native effort labels (composer + menus) follow the same color curve, including Default
-- Visible on new/draft sessions as soon as the model catalog loads; does not wait for a prompt
+- Visible on new/draft sessions once the selected model is known; notches are that model's variants only
 - Hidden when the current model exposes no effort variants
 - `Ctrl/Cmd+Shift+Left` / `Right` step one level
 

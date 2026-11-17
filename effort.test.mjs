@@ -10,6 +10,11 @@ import {
   detentTargetIndex,
   displayLabel,
   effortLadder,
+  idsFromVariants,
+  matchModelByLabel,
+  matchModelFromLabels,
+  modelMatches,
+  pickListedModel,
   energyFor,
   fillColorFor,
   indexFromPct,
@@ -138,6 +143,32 @@ test("Default matches the slider unset color instead of ranking as an unknown ma
   assert.notEqual(unset, colorForVariant("xhigh", variants))
   assert.equal(currentIndex(effortLadder(variants), undefined), 0)
   assert.equal(stepVariant(effortLadder(variants), undefined, 1), "low")
+})
+
+test("ladders keep only the model's own variants and never invent medium/xhigh/max", () => {
+  assert.deepEqual(effortLadder(["low", "high"]), ["default", "low", "high"])
+  assert.equal(effortLadder(["low", "high"]).includes("medium"), false)
+  assert.deepEqual(effortLadder(["low", "high", "xhigh"]), ["default", "low", "high", "xhigh"])
+  assert.deepEqual(idsFromVariants([{ id: "low" }, { id: "max" }]), ["low", "max"])
+  assert.deepEqual(idsFromVariants({ low: {}, high: {}, xhigh: {} }), ["low", "high", "xhigh"])
+  assert.equal(idsFromVariants({ low: {}, high: {} }).includes("medium"), false)
+})
+
+test("model matching is by provider/model id, not a default ladder or loose name", () => {
+  const grok = { providerID: "opencode", id: "grok-4.6", modelID: "grok-4.6", name: "Grok 4.6", variants: [{ id: "low" }, { id: "high" }, { id: "xhigh" }] }
+  const hy = { providerID: "opencode", id: "hy4-flash-free", name: "HY4 Flash Free", variants: { low: {}, high: {} } }
+  const deepseek = { providerID: "opencode", id: "deepseek-v4.1-flash", name: "DeepSeek V4.1 Flash", variants: ["low", "medium", "high", "max"] }
+  const listed = [grok, hy, deepseek]
+  assert.equal(pickListedModel(listed, { providerID: "opencode", modelID: "grok-4.6" }), grok)
+  assert.deepEqual(idsFromVariants(pickListedModel(listed, { providerID: "opencode", modelID: "grok-4.6" }).variants), ["low", "high", "xhigh"])
+  assert.deepEqual(idsFromVariants(pickListedModel(listed, { providerID: "opencode", modelID: "hy4-flash-free" }).variants), ["low", "high"])
+  assert.deepEqual(idsFromVariants(pickListedModel(listed, { providerID: "opencode", modelID: "deepseek-v4.1-flash" }).variants), ["low", "medium", "high", "max"])
+  assert.equal(modelMatches(grok, { providerID: "anthropic", modelID: "grok-4.6" }), false)
+  assert.equal(matchModelByLabel(listed, "Flash"), undefined)
+  assert.equal(matchModelByLabel(listed, "Grok 4.6"), grok)
+  assert.equal(matchModelFromLabels(listed, ["Build", "Grok 4.6", "Default"]), grok)
+  assert.equal(matchModelFromLabels(listed, ["Build", "Plan"]), undefined)
+  assert.equal(matchModelFromLabels(listed, ["HY4 Flash Free", "High"]), hy)
 })
 
 test("each model's own max is purple, even when missing from another ladder", () => {

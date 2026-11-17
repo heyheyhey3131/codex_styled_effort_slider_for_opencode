@@ -6,6 +6,7 @@ import {
   displayLabel,
   effortLadder,
   fillColorFor,
+  idsFromVariants,
   isDefaultLevel,
   isOffLevel,
   normalizeEffortId,
@@ -18,15 +19,10 @@ import {
   valueColorFor,
 } from "./effort.mjs"
 
-function variantIdsFromModel(model: { variants?: Array<{ id?: string } | string> } | undefined) {
-  const raw = model?.variants ?? []
-  return raw.map((item) => (typeof item === "string" ? item : String(item?.id ?? ""))).filter(Boolean)
-}
-
 function listVariants(context: ReturnType<typeof usePlugin>) {
+  const selected = context.ui.model.current()
   const fromUi = [...(context.ui.model.variant.list() ?? [])]
   if (fromUi.length > 0) return effortLadder(orderVariants(fromUi))
-  const selected = context.ui.model.current()
   if (!selected) return []
   const models = context.data.location.model.list(context.location) ?? []
   const found = models.find(
@@ -34,7 +30,7 @@ function listVariants(context: ReturnType<typeof usePlugin>) {
       item.providerID === selected.providerID &&
       (item.id === selected.modelID || item.modelID === selected.modelID),
   )
-  return effortLadder(orderVariants(variantIdsFromModel(found)))
+  return effortLadder(idsFromVariants(found?.variants))
 }
 
 function useEffort() {
