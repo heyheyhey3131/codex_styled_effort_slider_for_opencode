@@ -24,15 +24,18 @@ The desktop part is a GUI plugin (`./gui-experimental`), built into
 
 ## TUI
 
-In the terminal, the same control appears above the composer:
+In the terminal, the slider appears above the prompt (session) and in the home
+footer:
 
 ```text
 think  ●━━━━○━━━━○  Medium
 ```
 
-- `/effort` opens the picker, `/effort high` sets a level, `/effort +` steps
+- Shown on the home screen and in a session, even before the first prompt
+- Click a notch, or run `/effort` / `/effort high` / `/effort +`
 - `Ctrl+Shift+Left` / `Right` step one level
 - OpenCode's built-in `Ctrl+T` still cycles variants
+- Models without effort variants still show a muted `think` track so the plugin is visible
 
 ## Install
 
