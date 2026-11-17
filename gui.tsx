@@ -17,6 +17,7 @@ import {
   matchModelFromLabels,
   normalizeEffortId,
   orderVariants,
+  sameEffort,
   pickListedModel,
   PARTICLES,
   particleCountFor,
@@ -271,6 +272,92 @@ function findComposerFooter(composer = findVisibleComposer()) {
   return (controls?.parentElement as HTMLElement | null) ?? undefined
 }
 
+function findNativeEffortTrigger(composer = findVisibleComposer()) {
+  const controls = composer?.querySelector("[data-slot='composer-controls']")
+  const roots = [controls, composer].filter(Boolean) as Element[]
+  for (const root of roots) {
+    for (const button of actionButtons(root)) {
+      const text = effortText(button)
+      if (EFFORT_RE.test(text)) return button
+      const label = `${button.getAttribute("aria-label") || ""} ${button.getAttribute("title") || ""}`.toLowerCase()
+      if (/variant|thinking|effort|intensity/.test(label)) return button
+    }
+  }
+  return undefined
+}
+
+function effortMenuItems() {
+  return Array.from(
+    document.querySelectorAll('[role="menuitem"],[role="option"],[role="menuitemradio"],[role="menuitemcheckbox"]'),
+  ).filter((item) => !item.closest(".oces") && EFFORT_RE.test(effortText(item)))
+}
+
+function clickElement(node: Element) {
+  if (node instanceof HTMLElement) {
+    node.click()
+    return
+  }
+  node.dispatchEvent(new MouseEvent("click", { bubbles: true, cancelable: true, view: window }))
+}
+
+let applyingNative = false
+
+function nativeEffortMatches(id: string | undefined) {
+  const trigger = findNativeEffortTrigger()
+  if (!trigger) return false
+  return sameEffort(effortText(trigger), id)
+}
+
+function selectNativeEffortItem(id: string | undefined) {
+  const item = effortMenuItems().find((node) => sameEffort(effortText(node), id))
+  if (!item) return false
+  clickElement(item)
+  return true
+}
+
+function applyNativeEffort(id: string | undefined) {
+  if (applyingNative) return nativeEffortMatches(id)
+  const trigger = findNativeEffortTrigger()
+  if (!trigger) return false
+  if (sameEffort(effortText(trigger), id)) return true
+  applyingNative = true
+  const done = () => {
+    applyingNative = false
+  }
+  if (selectNativeEffortItem(id)) {
+    done()
+    return true
+  }
+  clickElement(trigger)
+  if (selectNativeEffortItem(id)) {
+    done()
+    return true
+  }
+  window.setTimeout(() => {
+    selectNativeEffortItem(id)
+    done()
+  }, 0)
+  return true
+}
+
+function applyComposerVariant(view: any, id: string | undefined) {
+  const next = normalizeEffortId(id)
+  if (view?.setVariant) {
+    const ok = view.setVariant(next)
+    if (ok !== false && (nativeEffortMatches(next) || !findNativeEffortTrigger())) return true
+  }
+  const selected = view?.model?.()
+  if (selected?.providerID && selected?.modelID && next !== undefined && view?.setModel) {
+    const ok = view.setModel({
+      providerID: selected.providerID,
+      modelID: selected.modelID,
+      variant: next,
+    })
+    if (ok !== false && (nativeEffortMatches(next) || !findNativeEffortTrigger())) return true
+  }
+  return applyNativeEffort(next)
+}
+
 const HOST_CLASS = "oces-host"
 let dockOwner = false
 
@@ -406,16 +493,26 @@ function Slider(props: { context: any }) {
     const timer = window.setInterval(() => {
       const key = selectionKey(model())
       if (key !== boundKey() || variants().length === 0) setNonce((value) => value + 1)
+      const hold = pending()
+      if (hold === UNSET || dragging()) return
+      const view = composer()
+      const next = normalizeEffortId(hold)
+      if (view?.setVariant && view.setVariant(next) !== false) setPending(UNSET)
+      else if (nativeEffortMatches(hold)) setPending(UNSET)
     }, 600)
     onCleanup(() => window.clearInterval(timer))
   })
 
   createEffect(() => {
-    const view = composer()
     const hold = pending()
-    if (!view || hold === UNSET) return
-    view.setVariant(normalizeEffortId(hold))
-    setPending(UNSET)
+    if (hold === UNSET || dragging()) return
+    const view = composer()
+    const next = normalizeEffortId(hold)
+    if (view?.setVariant && view.setVariant(next) !== false) {
+      setPending(UNSET)
+      return
+    }
+    if (nativeEffortMatches(hold)) setPending(UNSET)
   })
 
   const ladder = createMemo(() => effortLadder(variants()))
@@ -446,7 +543,7 @@ function Slider(props: { context: any }) {
     onCleanup(() => observer.disconnect())
   })
 
-  const commit = (nextPct: number, fromIndex = index()) => {
+  const commit = (nextPct: number, fromIndex = index(), persist = false) => {
     const list = ladder()
     if (list.length === 0) return
     const nextIndex = detentTargetIndex(Math.max(0, fromIndex), nextPct, list.length)
@@ -454,13 +551,10 @@ function Slider(props: { context: any }) {
     if (!id) return
     const next = normalizeEffortId(id)
     const now = normalizeEffortId(current())
-    if (String(next ?? "") === String(now ?? "")) return
-    const view = composer()
-    if (view) {
-      view.setVariant(next)
-      return
-    }
+    if (String(next ?? "") === String(now ?? "") && (!persist || nativeEffortMatches(next))) return
     setPending(next)
+    if (!persist) return
+    if (applyComposerVariant(composer(), next) || nativeEffortMatches(next)) setPending(UNSET)
   }
 
   const posFromEvent = (event: PointerEvent) => {
@@ -477,20 +571,20 @@ function Slider(props: { context: any }) {
     setDragging(true)
     const next = posFromEvent(event)
     setVisual(next)
-    commit(next)
+    commit(next, index(), false)
   }
   const onPointerMove = (event: PointerEvent) => {
     if (!dragging()) return
     const next = posFromEvent(event)
     setVisual(next)
-    commit(next)
+    commit(next, index(), false)
   }
   const onPointerUp = (event: PointerEvent) => {
     if (!dragging()) return
     const next = posFromEvent(event)
     const snapped = pctFromIndex(detentTargetIndex(Math.max(0, index()), next, ladder().length), ladder().length)
     setVisual(snapped)
-    commit(snapped)
+    commit(snapped, index(), true)
     setDragging(false)
   }
 
@@ -648,15 +742,8 @@ export default Plugin.define({
       const next = variants[Math.max(0, Math.min(variants.length - 1, (at < 0 ? 0 : at) + delta))]
       if (!next) return
       const value = normalizeEffortId(next)
-      const view = ctx.screen.current()?.composer
-      if (!view) {
-        ctx.toast.show({ title: ctx.t("command.set"), message: `Cannot set ${displayLabel(value)}`, variant: "error" })
-        return
-      }
-      if (!view.setVariant(value)) {
-        ctx.toast.show({ title: ctx.t("command.set"), message: `Cannot set ${displayLabel(value)}`, variant: "error" })
-        return
-      }
+      if (applyComposerVariant(ctx.screen.current()?.composer, value)) return
+      ctx.toast.show({ title: ctx.t("command.set"), message: `Cannot set ${displayLabel(value)}`, variant: "error" })
     }
 
     ctx.add(Command, () => ({

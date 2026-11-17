@@ -1,27 +1,34 @@
 import assert from "node:assert/strict"
 import test from "node:test"
 import {
+  barCells,
   COLOR_BLUE,
   COLOR_DEEP,
+  COLOR_KNOB,
   COLOR_TEXT_VIOLET,
   COLOR_VIOLET,
+  energyColorAt,
   colorForVariant,
   currentIndex,
   detentTargetIndex,
   displayLabel,
   effortLadder,
+  evenTrackWidth,
   idsFromVariants,
   matchModelByLabel,
   matchModelFromLabels,
   modelMatches,
   pickListedModel,
+  padEffortLabel,
   energyFor,
   fillColorFor,
+  gradientCells,
   indexFromPct,
   isDefaultLevel,
   isOffLevel,
   normalizeEffortId,
   orderVariants,
+  sameEffort,
   parseEffortArg,
   particleCountFor,
   pctFromIndex,
@@ -112,6 +119,56 @@ test("track has a knob, notches, and fill up to the current index", () => {
   assert.equal(sparkleFrame(0, 1), "✦")
 })
 
+test("codex bar is blue at low and purple-gradient at xhigh, with a white knob and dots", () => {
+  const low = barCells(5, 1, 16)
+  const high = barCells(5, 4, 16)
+  assert.equal(low.cells[0].bg, rgbHex(COLOR_BLUE))
+  assert.ok(low.cells.some((cell) => cell.knob && cell.ch === "●" && cell.fg === rgbHex(COLOR_KNOB)))
+  assert.equal(low.cells.filter((cell) => cell.notch).length, 5)
+  assert.equal(high.cells[0].bg, rgbHex(energyColorAt(0)))
+  assert.equal(high.cells[high.fillEnd].bg, rgbHex(energyColorAt(1)))
+  assert.ok(high.cells.every((cell) => cell.ch === "█" || cell.ch === "●" || cell.ch === "•"))
+})
+
+test("clicking a notch column selects that same level, not its left neighbour", () => {
+  for (const count of [3, 4, 5, 6]) {
+    const bar = barCells(count, 0, 16)
+    bar.columns.forEach((column, level) => {
+      assert.equal(bar.cells[column].variantIndex, level)
+      assert.equal(bar.cells[column].notch, true)
+    })
+  }
+  const bar = barCells(5, 2, 16)
+  let best = 0
+  for (let level = 0; level < bar.columns.length; level++) {
+    if (Math.abs(bar.columns[level] - bar.fillEnd) < Math.abs(bar.columns[best] - bar.fillEnd)) best = level
+  }
+  assert.equal(best, 2)
+  assert.equal(bar.cells[bar.fillEnd].knob, true)
+})
+
+test("gradient bar is a full-width block of squares from blue to deep", () => {
+  const cells = gradientCells(5, 16)
+  assert.equal(cells.length, 16)
+  assert.ok(cells.every((cell) => cell.ch === "■"))
+  assert.equal(cells[0].fg, rgbHex(COLOR_BLUE))
+  assert.equal(cells[15].fg, rgbHex(COLOR_DEEP))
+  assert.equal(cells[0].variantIndex, 0)
+  assert.equal(cells[15].variantIndex, 4)
+})
+
+test("track notches are equally spaced and labels pad to a stable width", () => {
+  assert.equal(evenTrackWidth(5, 16), 17)
+  const { cells } = trackCells(5, 0, 16)
+  const notches = cells.filter((cell) => cell.notch).map((cell) => cell.x)
+  assert.deepEqual(notches, [0, 4, 8, 12, 16])
+  const gaps = notches.slice(1).map((x, i) => x - notches[i])
+  assert.ok(gaps.every((gap) => gap === gaps[0]))
+  assert.equal(padEffortLabel("low", 8), "Low     ")
+  assert.equal(padEffortLabel(undefined, 8), "Default ")
+  assert.equal(padEffortLabel("medium", 8).length, padEffortLabel("low", 8).length)
+})
+
 test("detent crosses a third of a step, labels match native title case", () => {
   assert.equal(detentTargetIndex(0, 0.1, 4), 0)
   assert.equal(detentTargetIndex(0, 0.12, 4), 1)
@@ -135,6 +192,9 @@ test("Default matches the slider unset color instead of ranking as an unknown ma
   assert.equal(isDefaultLevel("Default"), true)
   assert.equal(isDefaultLevel("low"), false)
   assert.equal(normalizeEffortId("default"), undefined)
+  assert.equal(sameEffort(undefined, "Default"), true)
+  assert.equal(sameEffort("high", "High"), true)
+  assert.equal(sameEffort("high", "low"), false)
   assert.deepEqual(effortLadder(variants), ["default", "low", "medium", "high", "xhigh"])
   assert.equal(unset, rgbHex(COLOR_BLUE))
   assert.equal(colorForVariant(undefined, variants), unset)

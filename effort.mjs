@@ -10,9 +10,18 @@ export const COLOR_BLUE = [77, 147, 248]
 export const COLOR_VIOLET = [147, 51, 234]
 export const COLOR_DEEP = [76, 29, 149]
 export const COLOR_TEXT_VIOLET = [139, 92, 246]
+export const COLOR_KNOB = [255, 255, 255]
+export const COLOR_TRACK = [48, 48, 58]
 export const ENERGY_START = 1 / 3
 export const ENERGY_END = 2 / 3
 export const DEFAULT_TRACK_WIDTH = 16
+export const ENERGY_RGB = Object.freeze([
+  [59, 17, 120],
+  [109, 40, 217],
+  [147, 51, 234],
+  [192, 132, 252],
+])
+export const ENERGY_POS = Object.freeze([0, 0.3, 0.62, 1])
 
 export const RANK = Object.freeze({
   default: -1,
@@ -74,6 +83,28 @@ export function energyFor(pct) {
   return (p - ENERGY_START) / (1 - ENERGY_START)
 }
 
+export function energyColorAt(t) {
+  const u = clamp01(t)
+  for (let i = 1; i < ENERGY_POS.length; i++) {
+    if (u <= ENERGY_POS[i]) {
+      const span = ENERGY_POS[i] - ENERGY_POS[i - 1]
+      const local = span <= 0 ? 1 : (u - ENERGY_POS[i - 1]) / span
+      return mixRgb(ENERGY_RGB[i - 1], ENERGY_RGB[i], local)
+    }
+  }
+  return ENERGY_RGB[ENERGY_RGB.length - 1]
+}
+
+export function fillRgbAt(pct, along = 1) {
+  const p = clamp01(pct)
+  const u = clamp01(along)
+  const energy = energyFor(p)
+  if (energy <= 0) return COLOR_BLUE
+  const cool = mixRgb(COLOR_BLUE, COLOR_VIOLET, u)
+  const hot = energyColorAt(u)
+  return mixRgb(cool, hot, energy)
+}
+
 export function valueColorFor(pct, off = false) {
   if (off) return ""
   const p = clamp01(pct)
@@ -116,6 +147,12 @@ export function isDefaultLevel(id) {
 export function normalizeEffortId(id) {
   if (isDefaultLevel(id)) return undefined
   return id == null ? undefined : String(id)
+}
+
+export function sameEffort(a, b) {
+  const left = isDefaultLevel(a) ? "default" : String(a ?? "").trim().toLowerCase()
+  const right = isDefaultLevel(b) ? "default" : String(b ?? "").trim().toLowerCase()
+  return left === right
 }
 
 export function effortLadder(ids) {
@@ -251,6 +288,99 @@ export function variantIndexAtCell(cell, width, count) {
   return indexFromPct(cell / span, count)
 }
 
+export function evenTrackWidth(count, minWidth = DEFAULT_TRACK_WIDTH) {
+  const floor = Math.max(1, minWidth)
+  if (!(count > 1)) return floor
+  const span = count - 1
+  const gap = Math.max(1, Math.ceil((floor - 1) / span))
+  return span * gap + 1
+}
+
+export function padEffortLabel(id, width = 8) {
+  const text = displayLabel(id)
+  if (text.length >= width) return text.slice(0, width)
+  return text.padEnd(width, " ")
+}
+
+export const GRADIENT_BAR_WIDTH = 16
+
+export function gradientCells(count, width = GRADIENT_BAR_WIDTH) {
+  const w = Math.max(1, width)
+  const levels = Math.max(1, count)
+  const cells = []
+  for (let x = 0; x < w; x++) {
+    const pct = w === 1 ? 1 : x / (w - 1)
+    cells.push({
+      x,
+      ch: "■",
+      fg: fillColorFor(pct),
+      variantIndex: variantIndexAtCell(x, w, levels),
+    })
+  }
+  return cells
+}
+
+export function notchColumns(count, width = GRADIENT_BAR_WIDTH) {
+  const w = evenTrackWidth(count, width)
+  const span = Math.max(0, w - 1)
+  const columns = []
+  if (count > 0) {
+    for (let i = 0; i < count; i++) columns.push(Math.round(pctFromIndex(i, count) * span))
+  }
+  return columns
+}
+
+export function nearestNotchIndex(columns, x) {
+  if (!Array.isArray(columns) || columns.length === 0) return 0
+  let best = 0
+  let bestDistance = Infinity
+  for (let i = 0; i < columns.length; i++) {
+    const distance = Math.abs(columns[i] - x)
+    if (distance < bestDistance) {
+      bestDistance = distance
+      best = i
+    }
+  }
+  return best
+}
+
+export function barCells(count, index, width = GRADIENT_BAR_WIDTH) {
+  const w = evenTrackWidth(count, width)
+  const pct = pctFromIndex(index < 0 ? 0 : index, count)
+  const fillEnd = index < 0 ? -1 : Math.round(pct * Math.max(0, w - 1))
+  const columns = notchColumns(count, width)
+  const notchAt = new Set(columns)
+  const cells = []
+  for (let x = 0; x < w; x++) {
+    const inFill = x <= fillEnd
+    const along = fillEnd <= 0 ? 0 : x / fillEnd
+    const rgb = inFill ? fillRgbAt(pct, along) : COLOR_TRACK
+    const hex = rgbHex(rgb)
+    const isKnob = x === fillEnd && index >= 0
+    const isNotch = notchAt.has(x)
+    let ch = "█"
+    let fg = hex
+    if (isKnob) {
+      ch = "●"
+      fg = rgbHex(COLOR_KNOB)
+    } else if (isNotch) {
+      ch = "•"
+      fg = rgbHex(COLOR_KNOB)
+    }
+    cells.push({
+      x,
+      ch,
+      fg,
+      bg: hex,
+      knob: isKnob,
+      notch: isNotch,
+      filled: inFill,
+      variantIndex: nearestNotchIndex(columns, x),
+    })
+  }
+  return { cells, width: w, pct, fillEnd, columns }
+}
+
 export function stepVariant(variants, current, delta) {
   if (!Array.isArray(variants) || variants.length === 0) return undefined
   const step = delta < 0 ? -1 : 1
@@ -354,7 +484,7 @@ export function fillBackgroundFor(pct) {
 
 export function trackCells(count, index, width = DEFAULT_TRACK_WIDTH) {
   const cells = []
-  const w = Math.max(count > 0 ? count * 2 - 1 : 8, width)
+  const w = evenTrackWidth(count, width)
   const knob = index < 0 ? -1 : Math.round(pctFromIndex(index, count) * Math.max(0, w - 1))
   const pct = pctFromIndex(index < 0 ? 0 : index, count)
   const fill = fillColorFor(pct)

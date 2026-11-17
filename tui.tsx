@@ -1,21 +1,20 @@
 /** @jsxImportSource @opentui/solid */
 import { Plugin, usePlugin } from "@opencode/plugin/tui"
-import { createMemo, createSignal, For, onCleanup, onMount, Show } from "solid-js"
+import { createMemo, Index } from "solid-js"
 import {
+  barCells,
   currentIndex,
   displayLabel,
   effortLadder,
-  fillColorFor,
   idsFromVariants,
   isDefaultLevel,
   isOffLevel,
   normalizeEffortId,
   orderVariants,
+  padEffortLabel,
   parseEffortArg,
   pctFromIndex,
-  sparkleFrame,
   stepVariant,
-  trackCells,
   valueColorFor,
 } from "./effort.mjs"
 
@@ -41,6 +40,7 @@ function useEffort() {
   const pct = createMemo(() => pctFromIndex(index() < 0 ? 0 : index(), variants().length))
   const apply = (id: string | undefined, toast = false) => {
     const next = normalizeEffortId(id)
+    if (String(next ?? "") === String(normalizeEffortId(selected()) ?? "")) return true
     const ok = context.ui.model.variant.set(next)
     if (ok === false) {
       context.ui.toast.show({
@@ -103,82 +103,38 @@ function useEffort() {
 
 function EffortBar() {
   const effort = useEffort()
-  const [frame, setFrame] = createSignal(0)
-  onMount(() => {
-    const timer = setInterval(() => setFrame((value) => value + 1), 280)
-    onCleanup(() => clearInterval(timer))
-  })
-  const track = createMemo(() => trackCells(effort.variants().length, effort.index(), 18))
+  const bar = createMemo(() => barCells(effort.variants().length, effort.index(), 16))
   const labelColor = createMemo(() => {
     const off = isOffLevel(effort.selected())
     const color = valueColorFor(effort.pct(), off)
     return color || effort.context.theme.text.muted
   })
-  const sparkle = createMemo(() => sparkleFrame(frame(), track().energy))
-  const empty = createMemo(() => effort.variants().length === 0)
+  const pickCell = (variantIndex: number) => {
+    const list = effort.variants()
+    if (list.length === 0) return
+    const id = list[variantIndex]
+    if (id) effort.apply(id)
+  }
   return (
-    <box flexDirection="row" gap={1} paddingX={1} alignItems="center" onMouseUp={() => void effort.pick()}>
-      <text fg={effort.context.theme.text.muted}>think</text>
-      <Show
-        when={!empty()}
-        fallback={
-          <text fg={effort.context.theme.text.muted} onMouseUp={() => void effort.pick()}>
-            ●━━━━━━━━━━━━━━━━
-          </text>
-        }
-      >
-        <box flexDirection="row">
-          <For each={track().cells}>
-            {(cell) => (
-              <text
-                fg={cell.fg ?? effort.context.theme.text.muted}
-                onMouseDown={() => effort.apply(effort.variants()[cell.variantIndex])}
-                onMouseUp={() => effort.apply(effort.variants()[cell.variantIndex])}
-              >
-                {cell.ch}
-              </text>
-            )}
-          </For>
-        </box>
-      </Show>
-      <text fg={empty() ? effort.context.theme.text.muted : labelColor()} onMouseUp={() => void effort.pick()}>
-        {empty() ? "—" : displayLabel(effort.selected())}
+    <box flexDirection="row" height={1} flexShrink={0} alignItems="center" gap={1}>
+      <box flexDirection="row" height={1} flexShrink={0} gap={0}>
+        <Index each={bar().cells}>
+          {(cell) => (
+            <text
+              fg={cell().fg}
+              bg={cell().bg}
+              onMouseDown={() => pickCell(cell().variantIndex)}
+              onMouseUp={() => pickCell(cell().variantIndex)}
+            >
+              {cell().ch}
+            </text>
+          )}
+        </Index>
+      </box>
+      <text fg={effort.variants().length === 0 ? effort.context.theme.text.muted : labelColor()}>
+        {effort.variants().length === 0 ? "—".padEnd(8, " ") : padEffortLabel(effort.selected(), 8)}
       </text>
-      <Show when={sparkle()}>
-        {(glyph) => <text fg={fillColorFor(effort.pct())}>{glyph()}</text>}
-      </Show>
     </box>
-  )
-}
-
-function HomeBar() {
-  const context = usePlugin()
-  return (
-    <Show when={context.ui.router.current().type === "home"}>
-      <EffortBar />
-    </Show>
-  )
-}
-
-function SessionBar() {
-  const context = usePlugin()
-  return (
-    <Show when={context.ui.router.current().type !== "home"}>
-      <EffortBar />
-    </Show>
-  )
-}
-
-function EffortStatus() {
-  const effort = useEffort()
-  const color = createMemo(() => {
-    const off = isOffLevel(effort.selected())
-    return valueColorFor(effort.pct(), off) || effort.context.theme.text.muted
-  })
-  return (
-    <text fg={effort.variants().length > 0 ? color() : effort.context.theme.text.muted} onMouseUp={() => void effort.pick()}>
-      {effort.variants().length > 0 ? displayLabel(effort.selected()) : "think"}
-    </text>
   )
 }
 
@@ -296,24 +252,8 @@ export default Plugin.define({
     }))
 
     context.ui.slot({
-      before: "prompt.footer",
-      render: () => <SessionBar />,
-    })
-    context.ui.slot({
-      append: "session.composer.top",
-      render: () => <SessionBar />,
-    })
-    context.ui.slot({
-      append: "home.footer",
-      render: () => <HomeBar />,
-    })
-    context.ui.slot({
-      append: "prompt.footer.status",
-      render: () => <EffortStatus />,
-    })
-    context.ui.slot({
-      append: "home.footer.status",
-      render: () => <EffortStatus />,
+      after: "prompt.footer",
+      render: () => <EffortBar />,
     })
   },
 })
