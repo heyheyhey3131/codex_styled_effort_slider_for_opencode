@@ -1,5 +1,6 @@
 /** @jsxImportSource solid-js */
 import { createEffect, createMemo, createSignal, onCleanup, onMount, Show } from "solid-js"
+import { Portal } from "solid-js/web"
 import { Command, Plugin, Slot, Style } from "@opencode/plugin/gui"
 import {
   clamp01,
@@ -24,6 +25,8 @@ import {
 const KNOB = 22
 const CSS = `
 .oces-dock { display:none !important; }
+.oces-host { display:inline-flex; align-items:center; flex:0 0 auto; vertical-align:middle; }
+.oces-host:empty { display:none; }
 .oces { display:inline-flex; align-items:center; gap:6px; height:28px; margin:0 2px 0 0;
   flex:0 0 auto; user-select:none; -webkit-user-select:none; vertical-align:middle; }
 .oces-track { position:relative; width:146px; flex:0 0 146px; height:${KNOB}px; border-radius:999px; cursor:pointer;
@@ -213,20 +216,68 @@ function isSendLike(button: Element) {
 }
 
 function actionButtons(root: ParentNode) {
-  return Array.from(root.querySelectorAll("button,[role='button']")).filter((button) => !button.closest(".oces"))
+  return Array.from(root.querySelectorAll("button,[role='button']")).filter(
+    (button) => !button.closest(".oces, .oces-host"),
+  )
+}
+
+function isShown(node: Element) {
+  if (!(node instanceof HTMLElement)) return false
+  if (node.hidden || node.getAttribute("aria-hidden") === "true") return false
+  if ("inert" in node && (node as HTMLElement & { inert?: boolean }).inert) return false
+  const style = window.getComputedStyle(node)
+  if (style.display === "none" || style.visibility === "hidden") return false
+  const rect = node.getBoundingClientRect()
+  return rect.width > 1 && rect.height > 1
+}
+
+function findVisibleComposer() {
+  const list = Array.from(document.querySelectorAll("[data-component='composer']"))
+  const shown = list.filter(isShown)
+  const pool = shown.length ? shown : list
+  const active = document.activeElement
+  if (active instanceof Node) {
+    const hit = pool.find((node) => node.contains(active))
+    if (hit) return hit
+  }
+  return pool.at(-1)
 }
 
 function findSendButton() {
-  const actions = document.querySelector("[data-slot='composer-actions']")
+  const composer = findVisibleComposer()
+  const actions =
+    composer?.querySelector("[data-slot='composer-actions']") ??
+    Array.from(document.querySelectorAll("[data-slot='composer-actions']")).find(isShown)
   if (actions) {
     const buttons = actionButtons(actions)
     const named = buttons.find(isSendLike)
     if (named) return named
     if (buttons.length) return buttons[buttons.length - 1]
   }
-  const named = actionButtons(document).find(isSendLike)
+  const named = actionButtons(document).find((button) => isSendLike(button) && isShown(button))
   if (named) return named
   return undefined
+}
+
+const HOST_CLASS = "oces-host"
+let dockOwner = false
+
+function ensureHost(send: Element) {
+  const parent = send.parentElement
+  if (!parent) return undefined
+  let host = parent.querySelector(`:scope > .${HOST_CLASS}`) as HTMLElement | null
+  if (!host) {
+    host = document.createElement("span")
+    host.className = HOST_CLASS
+    host.setAttribute("data-oces-host", "")
+    parent.insertBefore(host, send)
+  } else if (host.nextElementSibling !== send) {
+    parent.insertBefore(host, send)
+  }
+  document.querySelectorAll(`.${HOST_CLASS}`).forEach((node) => {
+    if (node !== host) node.remove()
+  })
+  return host
 }
 
 function Slider(props: { context: any }) {
@@ -404,30 +455,51 @@ function Slider(props: { context: any }) {
 }
 
 function Dock(props: { context: any }) {
-  let dock: HTMLDivElement | undefined
+  const [active, setActive] = createSignal(false)
+  const [host, setHost] = createSignal<HTMLElement>()
   onMount(() => {
+    if (dockOwner) return
+    dockOwner = true
+    setActive(true)
+    let placing = false
     const place = () => {
-      const slider = (dock?.querySelector(".oces") ?? document.querySelector(".oces")) as HTMLElement | undefined
-      if (!slider) return
-      const send = findSendButton()
-      if (!send?.parentElement) return
-      if (slider.parentElement !== send.parentElement || slider.nextElementSibling !== send) {
-        send.parentElement.insertBefore(slider, send)
+      if (placing) return
+      placing = true
+      try {
+        const send = findSendButton()
+        if (!send?.parentElement) return
+        const next = ensureHost(send)
+        if (next && host() !== next) setHost(next)
+      } finally {
+        placing = false
       }
     }
-    const observer = new MutationObserver(place)
+    const observer = new MutationObserver((records) => {
+      const ours = (node: Node) =>
+        node instanceof Element && (node.classList.contains(HOST_CLASS) || node.closest(".oces, .oces-host"))
+      if (records.every((record) => [...record.addedNodes, ...record.removedNodes].every(ours))) return
+      place()
+    })
     observer.observe(document.body, { childList: true, subtree: true })
-    const timer = setInterval(place, 400)
+    const timer = window.setInterval(place, 500)
     place()
     onCleanup(() => {
       observer.disconnect()
-      clearInterval(timer)
+      window.clearInterval(timer)
+      document.querySelectorAll(`.${HOST_CLASS}`).forEach((node) => node.remove())
+      setHost(undefined)
+      setActive(false)
+      dockOwner = false
     })
   })
   return (
-    <div class="oces-dock" ref={dock}>
-      <Slider context={props.context} />
-    </div>
+    <Show when={active() && host()}>
+      {(node) => (
+        <Portal mount={node()}>
+          <Slider context={props.context} />
+        </Portal>
+      )}
+    </Show>
   )
 }
 
