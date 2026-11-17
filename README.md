@@ -39,7 +39,7 @@ From GitHub (OpenCode plugin field):
 
 ```jsonc
 {
-  "plugin": ["heyheyhey3131/codex-effort-slider"]
+  "plugin": ["heyheyhey3131/codex_styled_effort_slider_for_opencode"]
 }
 ```
 

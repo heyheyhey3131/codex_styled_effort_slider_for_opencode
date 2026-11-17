@@ -6,12 +6,12 @@
   "license": "MIT",
   "repository": {
     "type": "git",
-    "url": "https://github.com/heyheyhey3131/codex-effort-slider.git"
+    "url": "https://github.com/heyheyhey3131/codex_styled_effort_slider_for_opencode.git"
   },
   "bugs": {
-    "url": "https://github.com/heyheyhey3131/codex-effort-slider/issues"
+    "url": "https://github.com/heyheyhey3131/codex_styled_effort_slider_for_opencode/issues"
   },
-  "homepage": "https://github.com/heyheyhey3131/codex-effort-slider",
+  "homepage": "https://github.com/heyheyhey3131/codex_styled_effort_slider_for_opencode",
   "author": "heyheyhey3131",
   "exports": {
     ".": "./index.ts",
