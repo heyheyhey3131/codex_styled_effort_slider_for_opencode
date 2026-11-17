@@ -12,9 +12,10 @@ There is no official OpenCode slider plugin. This one talks to OpenCode's own
 The slider sits in the composer, immediately left of the send button (right of
 the native thinking-intensity control):
 
-- Continuous drag with detent; release snaps to a level
+- Continuous drag with detent; release snaps to a level, including **Default**
 - Low stays blue; higher levels shift violet, with right-to-left star particles
-- Native effort labels (composer + menus) follow the same color curve
+- Native effort labels (composer + menus) follow the same color curve, including Default
+- Visible on new/draft sessions as soon as the model catalog loads; does not wait for a prompt
 - Hidden when the current model exposes no effort variants
 - `Ctrl/Cmd+Shift+Left` / `Right` step one level
 

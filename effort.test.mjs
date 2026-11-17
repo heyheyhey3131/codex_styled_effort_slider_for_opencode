@@ -9,10 +9,13 @@ import {
   currentIndex,
   detentTargetIndex,
   displayLabel,
+  effortLadder,
   energyFor,
   fillColorFor,
   indexFromPct,
+  isDefaultLevel,
   isOffLevel,
+  normalizeEffortId,
   orderVariants,
   parseEffortArg,
   particleCountFor,
@@ -28,6 +31,7 @@ import {
 test("orders known effort names low-to-max and keeps unknown stable", () => {
   assert.deepEqual(orderVariants(["high", "low", "max", "medium"]), ["low", "medium", "high", "max"])
   assert.deepEqual(orderVariants(["custom", "low", "custom-2"]), ["low", "custom", "custom-2"])
+  assert.deepEqual(orderVariants(["high", "default", "low"]), ["default", "low", "high"])
 })
 
 test("pct/index round-trip and single-level max", () => {
@@ -116,6 +120,24 @@ test("native effort labels follow the slider color curve", () => {
   assert.equal(colorForVariant("xhigh", variants), rgbHex(COLOR_TEXT_VIOLET))
   assert.equal(colorForVariant("off", variants), "")
   assert.notEqual(colorForVariant("medium", variants), colorForVariant("high", variants))
+})
+
+test("Default matches the slider unset color instead of ranking as an unknown max", () => {
+  const variants = ["low", "medium", "high", "xhigh"]
+  const unset = colorForVariant("default", variants)
+  assert.equal(isDefaultLevel(undefined), true)
+  assert.equal(isDefaultLevel(""), true)
+  assert.equal(isDefaultLevel("Default"), true)
+  assert.equal(isDefaultLevel("low"), false)
+  assert.equal(normalizeEffortId("default"), undefined)
+  assert.deepEqual(effortLadder(variants), ["default", "low", "medium", "high", "xhigh"])
+  assert.equal(unset, rgbHex(COLOR_BLUE))
+  assert.equal(colorForVariant(undefined, variants), unset)
+  assert.equal(colorForVariant("", variants), unset)
+  assert.equal(colorForVariant("Default", variants), unset)
+  assert.notEqual(unset, colorForVariant("xhigh", variants))
+  assert.equal(currentIndex(effortLadder(variants), undefined), 0)
+  assert.equal(stepVariant(effortLadder(variants), undefined, 1), "low")
 })
 
 test("each model's own max is purple, even when missing from another ladder", () => {

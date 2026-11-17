@@ -15,6 +15,9 @@ export const ENERGY_END = 2 / 3
 export const DEFAULT_TRACK_WIDTH = 16
 
 export const RANK = Object.freeze({
+  default: -1,
+  auto: -1,
+  reset: -1,
   none: 0,
   off: 0,
   disable: 0,
@@ -34,6 +37,7 @@ export const RANK = Object.freeze({
 })
 
 const OFF_NAMES = new Set(["off", "none", "disable", "disabled", "关闭", "無", "无"])
+const DEFAULT_NAMES = new Set(["default", "auto", "reset"])
 
 export function clamp01(value) {
   if (!(value > 0)) return 0
@@ -82,13 +86,15 @@ export function valueColorFor(pct, off = false) {
 }
 
 export function colorForVariant(id, variants = []) {
-  if (id == null || id === "" || isOffLevel(id)) return ""
-  const incoming = Array.isArray(variants) ? variants.filter((item) => item != null && item !== "" && !isOffLevel(item)) : []
-  let list = orderVariants(incoming)
-  if (currentIndex(list, id) < 0) list = orderVariants([...list, String(id)])
-  if (list.length === 0) list = [String(id)]
-  const index = currentIndex(list, id)
-  return valueColorFor(pctFromIndex(index < 0 ? list.length - 1 : index, list.length), false)
+  if (isOffLevel(id)) return ""
+  const list = effortLadder(variants)
+  if (isDefaultLevel(id)) return valueColorFor(pctFromIndex(0, Math.max(1, list.length)), false)
+  const incoming = Array.isArray(variants) ? variants.filter((item) => item != null && item !== "" && !isOffLevel(item) && !isDefaultLevel(item)) : []
+  let ladder = list.length ? list : orderVariants(incoming)
+  if (currentIndex(ladder, id) < 0) ladder = effortLadder([...incoming, String(id)])
+  if (ladder.length === 0) ladder = [String(id)]
+  const index = currentIndex(ladder, id)
+  return valueColorFor(pctFromIndex(index < 0 ? ladder.length - 1 : index, ladder.length), false)
 }
 
 export function particleCountFor(pct, max = 8) {
@@ -100,6 +106,24 @@ export function particleCountFor(pct, max = 8) {
 export function isOffLevel(id) {
   if (id == null) return false
   return OFF_NAMES.has(String(id).trim().toLowerCase())
+}
+
+export function isDefaultLevel(id) {
+  if (id == null || id === "") return true
+  return DEFAULT_NAMES.has(String(id).trim().toLowerCase())
+}
+
+export function normalizeEffortId(id) {
+  if (isDefaultLevel(id)) return undefined
+  return id == null ? undefined : String(id)
+}
+
+export function effortLadder(ids) {
+  const ordered = orderVariants(
+    (Array.isArray(ids) ? ids : []).filter((id) => id != null && id !== "" && !isDefaultLevel(id)),
+  )
+  if (ordered.length === 0) return []
+  return ["default", ...ordered]
 }
 
 export function rankOf(id) {
@@ -119,7 +143,11 @@ export function orderVariants(ids) {
 }
 
 export function currentIndex(variants, current) {
-  if (!Array.isArray(variants) || current == null || current === "") return -1
+  if (!Array.isArray(variants) || variants.length === 0) return -1
+  if (isDefaultLevel(current)) {
+    const index = variants.findIndex((id) => isDefaultLevel(id))
+    return index
+  }
   const needle = String(current).toLowerCase()
   return variants.findIndex((id) => String(id).toLowerCase() === needle)
 }

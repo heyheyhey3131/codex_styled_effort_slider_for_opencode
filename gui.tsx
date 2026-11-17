@@ -5,12 +5,15 @@ import { Command, Plugin, Slot, Style } from "@opencode/plugin/gui"
 import {
   clamp01,
   colorForVariant,
+  currentIndex,
   detentTargetIndex,
   displayLabel,
+  effortLadder,
   energyFor,
   fillBackgroundFor,
-  fillColorFor,
+  isDefaultLevel,
   isOffLevel,
+  normalizeEffortId,
   orderVariants,
   PARTICLES,
   particleCountFor,
@@ -25,8 +28,9 @@ import {
 const KNOB = 22
 const CSS = `
 .oces-dock { display:none !important; }
-.oces-host { display:inline-flex; align-items:center; flex:0 0 auto; vertical-align:middle; }
+.oces-host { display:inline-flex; align-items:center; flex:0 0 auto; margin-inline-start:auto; vertical-align:middle; }
 .oces-host:empty { display:none; }
+[data-slot="composer-actions"] > .oces-host { margin-inline-start:0; }
 .oces { display:inline-flex; align-items:center; gap:6px; height:28px; margin:0 2px 0 0;
   flex:0 0 auto; user-select:none; -webkit-user-select:none; vertical-align:middle; }
 .oces-track { position:relative; width:146px; flex:0 0 146px; height:${KNOB}px; border-radius:999px; cursor:pointer;
@@ -173,7 +177,7 @@ function ladderFor(node: Element, fallback: string[]) {
 }
 
 function paintNativeEffort(variants: string[], current?: string) {
-  const fallback = variants.length ? variants : ["low", "medium", "high", "xhigh", "max"]
+  const fallback = variants.length ? effortLadder(variants) : ["default", "low", "medium", "high", "xhigh", "max"]
   const keep = new Set<Element>()
   const send = findSendButton()
   const buttons = Array.from(document.querySelectorAll("button,[role='button']"))
@@ -182,7 +186,8 @@ function paintNativeEffort(variants: string[], current?: string) {
     const text = effortText(button)
     if (!EFFORT_RE.test(text)) continue
     const composer = isComposerEffortButton(button, send)
-    const color = colorForVariant(composer ? current || text : text, composer ? fallback : ladderFor(button, fallback))
+    const id = composer ? current || text : text
+    const color = colorForVariant(id, composer ? fallback : ladderFor(button, fallback))
     paintLabels(button, color, keep)
     keep.add(button)
     if (!composer) continue
@@ -212,7 +217,7 @@ function isSendLike(button: Element) {
   ]
     .join(" ")
     .toLowerCase()
-  return /(send|submit|stop|发送|提交|停止)/.test(label)
+  return /(send|submit|stop|queue|steer|发送|提交|停止)/.test(label)
 }
 
 function actionButtons(root: ParentNode) {
@@ -243,36 +248,40 @@ function findVisibleComposer() {
   return pool.at(-1)
 }
 
-function findSendButton() {
-  const composer = findVisibleComposer()
+function findSendButton(composer = findVisibleComposer()) {
   const actions =
     composer?.querySelector("[data-slot='composer-actions']") ??
     Array.from(document.querySelectorAll("[data-slot='composer-actions']")).find(isShown)
-  if (actions) {
-    const buttons = actionButtons(actions)
+  if (actions && isShown(actions)) {
+    const buttons = actionButtons(actions).filter(isShown)
     const named = buttons.find(isSendLike)
     if (named) return named
     if (buttons.length) return buttons[buttons.length - 1]
   }
-  const named = actionButtons(document).find((button) => isSendLike(button) && isShown(button))
+  const named = actionButtons(composer ?? document).find((button) => isSendLike(button) && isShown(button))
   if (named) return named
   return undefined
+}
+
+function findComposerFooter(composer = findVisibleComposer()) {
+  const controls = composer?.querySelector("[data-slot='composer-controls']")
+  return (controls?.parentElement as HTMLElement | null) ?? undefined
 }
 
 const HOST_CLASS = "oces-host"
 let dockOwner = false
 
-function ensureHost(send: Element) {
-  const parent = send.parentElement
-  if (!parent) return undefined
+function ensureHost(anchor: { parent: Element; before?: Element | null }) {
+  const parent = anchor.parent
   let host = parent.querySelector(`:scope > .${HOST_CLASS}`) as HTMLElement | null
   if (!host) {
     host = document.createElement("span")
     host.className = HOST_CLASS
     host.setAttribute("data-oces-host", "")
-    parent.insertBefore(host, send)
-  } else if (host.nextElementSibling !== send) {
-    parent.insertBefore(host, send)
+  }
+  const before = anchor.before ?? null
+  if (host.parentElement !== parent || host.nextElementSibling !== before) {
+    parent.insertBefore(host, before)
   }
   document.querySelectorAll(`.${HOST_CLASS}`).forEach((node) => {
     if (node !== host) node.remove()
@@ -280,38 +289,118 @@ function ensureHost(send: Element) {
   return host
 }
 
+function placeHost() {
+  const composer = findVisibleComposer()
+  if (!composer) return undefined
+  const send = findSendButton(composer)
+  if (send?.parentElement && isShown(send)) {
+    return ensureHost({ parent: send.parentElement, before: send })
+  }
+  const footer = findComposerFooter(composer)
+  if (!footer) return undefined
+  return ensureHost({ parent: footer })
+}
+
+function unwrapList(response: any) {
+  if (Array.isArray(response)) return response
+  if (Array.isArray(response?.data)) return response.data
+  return []
+}
+
+function scrapeEffortLabel(composer = findVisibleComposer()) {
+  const controls = composer?.querySelector("[data-slot='composer-controls']")
+  if (!controls) return undefined
+  for (const button of actionButtons(controls)) {
+    const text = effortText(button)
+    if (EFFORT_RE.test(text)) return text
+  }
+  return undefined
+}
+
+function scrapeModel(models: any[], composer = findVisibleComposer()) {
+  const controls = composer?.querySelector("[data-slot='composer-controls']")
+  if (!controls || models.length === 0) return undefined
+  for (const button of actionButtons(controls)) {
+    const text = effortText(button)
+    if (!text || EFFORT_RE.test(text)) continue
+    const lower = text.toLowerCase()
+    const exact = models.find((item) => String(item?.name ?? "").toLowerCase() === lower)
+    if (exact) return exact
+    const loose = models.find((item) => {
+      const name = String(item?.name ?? "").toLowerCase()
+      return name && (name.includes(lower) || lower.includes(name))
+    })
+    if (loose) return loose
+  }
+  return undefined
+}
+
+async function loadModelCatalog(client: any, directory?: string) {
+  const query = directory ? { location: { directory } } : undefined
+  const listed = unwrapList(await client.model.list(query))
+  let selected: any
+  try {
+    const fallback = await client.model.default(query)
+    selected = fallback?.data ?? fallback
+    if (selected && Array.isArray(selected)) selected = undefined
+  } catch {
+    selected = undefined
+  }
+  return { listed, selected }
+}
+
+function variantIds(model: any) {
+  return orderVariants((model?.variants ?? []).map((variant: Variant) => variant.id))
+}
+
+const UNSET = Symbol("oces-pending-unset")
+
 function Slider(props: { context: any }) {
   const [variants, setVariants] = createSignal<string[]>([])
   const [visual, setVisual] = createSignal(0)
   const [dragging, setDragging] = createSignal(false)
+  const [pending, setPending] = createSignal<string | undefined | typeof UNSET>(UNSET)
+  const [nonce, setNonce] = createSignal(0)
   let track: HTMLDivElement | undefined
 
   const session = () => props.context.sessions.current()
   const composer = () => props.context.screen.current()?.composer
   const model = () => composer()?.model()
-  const current = () => model()?.variant
+  const current = () => {
+    const hold = pending()
+    if (hold !== UNSET) return hold
+    if (model()) return model()?.variant
+    return scrapeEffortLabel()
+  }
 
   createEffect(() => {
     const selected = model()
     const directory = session()?.directory
-    if (!selected?.providerID || !selected?.modelID) {
-      setVariants([])
-      return
-    }
+    nonce()
     let cancelled = false
     void (async () => {
       try {
-        const response = await props.context.client.model.list({ location: { directory } })
-        const list = Array.isArray(response) ? response : (response?.data ?? [])
-        const found = list.find(
-          (item: any) =>
-            item?.providerID === selected.providerID &&
-            (item?.id === selected.modelID || item?.modelID === selected.modelID),
-        )
+        const { listed, selected: fallback } = await loadModelCatalog(props.context.client, directory)
         if (cancelled) return
-        setVariants(orderVariants((found?.variants ?? []).map((variant: Variant) => variant.id)))
+        const scraped = scrapeModel(listed)
+        const found =
+          listed.find(
+            (item: any) =>
+              selected?.providerID &&
+              item?.providerID === selected.providerID &&
+              (item?.id === selected.modelID || item?.modelID === selected.modelID),
+          ) ??
+          listed.find(
+            (item: any) =>
+              fallback &&
+              item?.providerID === fallback.providerID &&
+              (item?.id === fallback.modelID || item?.modelID === fallback.modelID || item?.id === fallback.id),
+          ) ??
+          scraped ??
+          fallback
+        if (!cancelled) setVariants(variantIds(found))
       } catch {
-        if (!cancelled) setVariants([])
+        if (!cancelled && variants().length === 0) setVariants([])
       }
     })()
     onCleanup(() => {
@@ -319,12 +408,24 @@ function Slider(props: { context: any }) {
     })
   })
 
-  const index = createMemo(() => {
-    const value = current()
-    if (!value) return -1
-    return variants().findIndex((id) => id.toLowerCase() === String(value).toLowerCase())
+  onMount(() => {
+    const timer = window.setInterval(() => {
+      if (!session() || variants().length === 0) setNonce((value) => value + 1)
+    }, 800)
+    onCleanup(() => window.clearInterval(timer))
   })
-  const targetPct = createMemo(() => pctFromIndex(Math.max(0, index()), variants().length))
+
+  createEffect(() => {
+    const view = composer()
+    const hold = pending()
+    if (!view || hold === UNSET) return
+    view.setVariant(normalizeEffortId(hold))
+    setPending(UNSET)
+  })
+
+  const ladder = createMemo(() => effortLadder(variants()))
+  const index = createMemo(() => currentIndex(ladder(), current()))
+  const targetPct = createMemo(() => pctFromIndex(Math.max(0, index()), ladder().length))
   createEffect(() => {
     if (!dragging()) setVisual(targetPct())
   })
@@ -335,8 +436,10 @@ function Slider(props: { context: any }) {
   const stars = createMemo(() => particleCountFor(pct(), 22))
   const speed = createMemo(() => speedFor(pct()))
   const off = createMemo(() => isOffLevel(current()))
-  const label = createMemo(() => displayLabel(current()))
-  const labelColor = createMemo(() => valueColorFor(pct(), off()))
+  const label = createMemo(() => displayLabel(normalizeEffortId(current())))
+  const labelColor = createMemo(() =>
+    isDefaultLevel(current()) ? colorForVariant("default", variants()) : valueColorFor(pct(), off()),
+  )
 
   createEffect(() => {
     const list = variants()
@@ -349,13 +452,20 @@ function Slider(props: { context: any }) {
   })
 
   const commit = (nextPct: number, fromIndex = index()) => {
-    const list = variants()
+    const list = ladder()
     if (list.length === 0) return
     const nextIndex = detentTargetIndex(Math.max(0, fromIndex), nextPct, list.length)
     const id = list[nextIndex]
     if (!id) return
-    if (id.toLowerCase() === String(current() || "").toLowerCase()) return
-    composer()?.setVariant(id)
+    const next = normalizeEffortId(id)
+    const now = normalizeEffortId(current())
+    if (String(next ?? "") === String(now ?? "")) return
+    const view = composer()
+    if (view) {
+      view.setVariant(next)
+      return
+    }
+    setPending(next)
   }
 
   const posFromEvent = (event: PointerEvent) => {
@@ -383,7 +493,7 @@ function Slider(props: { context: any }) {
   const onPointerUp = (event: PointerEvent) => {
     if (!dragging()) return
     const next = posFromEvent(event)
-    const snapped = pctFromIndex(detentTargetIndex(Math.max(0, index()), next, variants().length), variants().length)
+    const snapped = pctFromIndex(detentTargetIndex(Math.max(0, index()), next, ladder().length), ladder().length)
     setVisual(snapped)
     commit(snapped)
     setDragging(false)
@@ -399,7 +509,7 @@ function Slider(props: { context: any }) {
           role="slider"
           aria-label="Thinking intensity"
           aria-valuemin={0}
-          aria-valuemax={Math.max(0, variants().length - 1)}
+          aria-valuemax={Math.max(0, ladder().length - 1)}
           aria-valuenow={Math.max(0, index())}
           aria-valuetext={label()}
           style={{
@@ -437,10 +547,10 @@ function Slider(props: { context: any }) {
             </div>
           </div>
           <div class="oces-ticks">
-            {variants().map((_, i) => (
+            {ladder().map((_, i) => (
               <span
                 class={`oces-tick${i <= Math.max(0, index()) ? " is-on" : ""}`}
-                style={{ left: `calc(${KNOB / 2}px + (100% - ${KNOB}px) * ${pctFromIndex(i, variants().length)})` }}
+                style={{ left: `calc(${KNOB / 2}px + (100% - ${KNOB}px) * ${pctFromIndex(i, ladder().length)})` }}
               />
             ))}
           </div>
@@ -466,9 +576,7 @@ function Dock(props: { context: any }) {
       if (placing) return
       placing = true
       try {
-        const send = findSendButton()
-        if (!send?.parentElement) return
-        const next = ensureHost(send)
+        const next = placeHost()
         if (next && host() !== next) setHost(next)
       } finally {
         placing = false
@@ -523,16 +631,26 @@ export default Plugin.define({
     const variantsFor = async () => {
       const session = ctx.sessions.current()
       const model = ctx.screen.current()?.composer.model()
-      if (!session || !model?.providerID || !model?.modelID) return { model, variants: [] as string[] }
       try {
-        const response = await ctx.client.model.list({ location: { directory: session.directory } })
-        const list = Array.isArray(response) ? response : (response?.data ?? [])
-        const found = list.find(
-          (item: any) =>
-            item?.providerID === model.providerID &&
-            (item?.id === model.modelID || item?.modelID === model.modelID),
-        )
-        return { model, variants: orderVariants((found?.variants ?? []).map((v: Variant) => v.id)) }
+        const { listed, selected } = await loadModelCatalog(ctx.client, session?.directory)
+        const found =
+          listed.find(
+            (item: any) =>
+              model?.providerID &&
+              item?.providerID === model.providerID &&
+              (item?.id === model.modelID || item?.modelID === model.modelID),
+          ) ??
+          listed.find(
+            (item: any) =>
+              selected &&
+              item?.providerID === selected.providerID &&
+              (item?.id === selected.modelID || item?.modelID === selected.modelID || item?.id === selected.id),
+          ) ??
+          scrapeModel(listed)
+        return {
+          model,
+          variants: effortLadder(variantIds(found ?? selected)),
+        }
       } catch {
         return { model, variants: [] as string[] }
       }
@@ -540,15 +658,21 @@ export default Plugin.define({
 
     const jump = async (delta: number) => {
       const { model, variants } = await variantsFor()
-      if (!model || variants.length === 0) {
+      if (variants.length === 0) {
         ctx.toast.show({ title: ctx.t("command.set"), message: ctx.t("toast.unavailable"), variant: "warning" })
         return
       }
-      const at = model.variant ? variants.findIndex((id) => id.toLowerCase() === String(model.variant).toLowerCase()) : -1
+      const at = currentIndex(variants, model?.variant)
       const next = variants[Math.max(0, Math.min(variants.length - 1, (at < 0 ? 0 : at) + delta))]
       if (!next) return
-      if (!ctx.screen.current()?.composer.setVariant(next)) {
-        ctx.toast.show({ title: ctx.t("command.set"), message: `Cannot set ${next}`, variant: "error" })
+      const value = normalizeEffortId(next)
+      const view = ctx.screen.current()?.composer
+      if (!view) {
+        ctx.toast.show({ title: ctx.t("command.set"), message: `Cannot set ${displayLabel(value)}`, variant: "error" })
+        return
+      }
+      if (!view.setVariant(value)) {
+        ctx.toast.show({ title: ctx.t("command.set"), message: `Cannot set ${displayLabel(value)}`, variant: "error" })
         return
       }
     }

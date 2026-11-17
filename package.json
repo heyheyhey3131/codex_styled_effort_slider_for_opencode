@@ -1,6 +1,6 @@
 {
   "name": "codex-effort-slider",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "description": "Codex-style thinking-intensity slider for OpenCode (TUI notches, /effort, click-to-set)",
   "type": "module",
   "license": "MIT",

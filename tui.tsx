@@ -2,9 +2,13 @@
 import { Plugin, usePlugin } from "@opencode/plugin/tui"
 import { createMemo, createSignal, For, onCleanup, onMount, Show } from "solid-js"
 import {
+  currentIndex,
   displayLabel,
+  effortLadder,
   fillColorFor,
+  isDefaultLevel,
   isOffLevel,
+  normalizeEffortId,
   orderVariants,
   parseEffortArg,
   pctFromIndex,
@@ -16,17 +20,12 @@ import {
 
 function useEffort() {
   const context = usePlugin()
-  const variants = createMemo(() => orderVariants(context.ui.model.variant.list() ?? []))
+  const variants = createMemo(() => effortLadder(orderVariants(context.ui.model.variant.list() ?? [])))
   const selected = createMemo(() => context.ui.model.current()?.variant)
-  const index = createMemo(() => {
-    const list = variants()
-    const current = selected()
-    if (current == null || current === "") return -1
-    return list.indexOf(current)
-  })
+  const index = createMemo(() => currentIndex(variants(), selected()))
   const pct = createMemo(() => pctFromIndex(index() < 0 ? 0 : index(), variants().length))
   const apply = (id: string | undefined, toast = false) => {
-    const ok = context.ui.model.variant.set(id)
+    const ok = context.ui.model.variant.set(normalizeEffortId(id))
     if (ok === false) {
       context.ui.toast.show({
         message: id ? `This model has no "${id}" effort` : "No model selected",
@@ -58,7 +57,7 @@ function useEffort() {
       current: selected() ?? "",
       options: [
         { title: "Default (model)", value: "", description: "Provider default effort" },
-        ...list.map((id) => ({
+        ...list.filter((id) => !isDefaultLevel(id)).map((id) => ({
           title: displayLabel(id),
           value: id,
           description: isOffLevel(id) ? "Reasoning off" : `Effort ${id}`,
@@ -146,11 +145,11 @@ export default Plugin.define({
     const commands = () => {
       const effort = {
         runSlash: async (input?: string) => {
-          const variants = orderVariants(context.ui.model.variant.list() ?? [])
+          const variants = effortLadder(orderVariants(context.ui.model.variant.list() ?? []))
           const selected = context.ui.model.current()?.variant
           const parsed = parseEffortArg(input, variants)
           const apply = (id: string | undefined) => {
-            const ok = context.ui.model.variant.set(id)
+            const ok = context.ui.model.variant.set(normalizeEffortId(id))
             if (ok === false) {
               context.ui.toast.show({
                 message: id ? `This model has no "${id}" effort` : "No model selected",
@@ -200,7 +199,7 @@ export default Plugin.define({
           })
         },
         step(delta: number) {
-          const variants = orderVariants(context.ui.model.variant.list() ?? [])
+          const variants = effortLadder(orderVariants(context.ui.model.variant.list() ?? []))
           const next = stepVariant(variants, context.ui.model.current()?.variant, delta)
           if (!next) {
             context.ui.toast.show({ message: "This model has no thinking-effort variants", variant: "warning" })
