@@ -1,0 +1,56 @@
+{
+  "name": "codex-effort-slider",
+  "version": "1.0.0",
+  "description": "Codex-style thinking-intensity slider for OpenCode (TUI notches, /effort, click-to-set)",
+  "type": "module",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/heyheyhey3131/codex-effort-slider.git"
+  },
+  "bugs": {
+    "url": "https://github.com/heyheyhey3131/codex-effort-slider/issues"
+  },
+  "homepage": "https://github.com/heyheyhey3131/codex-effort-slider",
+  "author": "heyheyhey3131",
+  "exports": {
+    ".": "./index.ts",
+    "./tui": "./tui.tsx",
+    "./gui-experimental": "./dist/gui-experimental.cjs"
+  },
+  "files": [
+    "index.ts",
+    "tui.tsx",
+    "gui.tsx",
+    "dist",
+    "effort.mjs",
+    "README.md"
+  ],
+  "scripts": {
+    "test": "node --test effort.test.mjs",
+    "build": "vite build"
+  },
+  "keywords": [
+    "opencode",
+    "opencode-plugin",
+    "thinking",
+    "reasoning-effort",
+    "slider"
+  ],
+  "dependencies": {
+    "@opencode/plugin": "latest"
+  },
+  "devDependencies": {
+    "solid-js": ">=1.9.0",
+    "vite": "^8.0.0",
+    "vite-plugin-solid": "^2.11.0"
+  },
+  "peerDependencies": {
+    "@opentui/core": ">=0.5.10",
+    "@opentui/solid": ">=0.5.10",
+    "solid-js": ">=1.9.0"
+  },
+  "engines": {
+    "node": ">=22"
+  }
+}
