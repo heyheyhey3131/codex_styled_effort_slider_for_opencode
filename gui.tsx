@@ -13,6 +13,7 @@ import {
   effortLadder,
   energyFor,
   fillBackgroundFor,
+  fillColorFor,
   idsFromVariants,
   isDefaultLevel,
   isOffLevel,
@@ -33,19 +34,31 @@ import {
 } from "./effort.mjs"
 
 const KNOB = 16
+
+function hexToRgba(hex: string, alpha: number) {
+  const clean = String(hex || "").replace("#", "")
+  if (clean.length < 6) return `rgba(168,85,247,${alpha})`
+  const n = Number.parseInt(clean, 16)
+  const a = Math.max(0, Math.min(1, alpha))
+  return `rgba(${(n >> 16) & 255},${(n >> 8) & 255},${n & 255},${Math.round(a * 1000) / 1000})`
+}
+
 const CSS = `
 .oces-dock { display:none !important; }
-.oces-host { display:inline-flex; align-items:center; flex:0 0 auto; margin-inline-start:auto; vertical-align:middle; }
+.oces-host { display:inline-flex; align-items:center; flex:0 0 auto; margin-inline-start:auto; margin-inline-end:8px; vertical-align:middle; }
 .oces-host:empty { display:none; }
 [data-slot="composer-actions"] > .oces-host { margin-inline-start:0; }
-.oces { display:inline-flex; align-items:center; gap:8px; height:28px; margin:0 2px 0 0; padding:4px 10px 4px 4px;
-  flex:0 0 auto; box-sizing:border-box; border-radius:999px; border:1px solid rgba(96,96,112,.58);
-  background:rgba(16,16,22,.32); box-shadow:inset 0 1px 0 rgba(255,255,255,.05);
+.oces { display:inline-flex; align-items:center; gap:8px; height:28px; margin:0 12px 0 0; padding:4px 8px 4px 4px;
+  flex:0 0 auto; box-sizing:border-box; border-radius:999px; border:0;
+  background:var(--oces-ring-fill, rgba(16,16,22,.32));
+  box-shadow:inset 0 0 0 1px var(--oces-ring, rgba(96,96,112,.45)),
+    0 0 var(--oces-ring-blur, 0px) var(--oces-ring-spread, 0px) var(--oces-ring-glow, transparent);
+  transition: box-shadow .2s ease, background-color .2s ease;
   user-select:none; -webkit-user-select:none; vertical-align:middle; }
 .oces-track { position:relative; width:118px; flex:0 0 118px; height:${KNOB}px; border-radius:999px; cursor:pointer;
-  touch-action:none; background:rgba(128,128,145,.18);
+  touch-action:none; background:rgba(128,128,145,.18); transition:box-shadow .2s ease;
   box-shadow:inset 0 1px 2px rgba(0,0,0,.28), inset 0 0 0 1px rgba(255,255,255,.06); }
-.oces-track[data-energy="1"] { box-shadow:0 0 calc(var(--oces-energy,0) * 14px) rgba(168,85,247,.48), inset 0 1px 2px rgba(0,0,0,.28); }
+.oces-track[data-energy="1"] { box-shadow:0 0 calc(var(--oces-energy,0) * 16px) var(--oces-fill-glow, rgba(168,85,247,.5)), inset 0 1px 2px rgba(0,0,0,.24); }
 .oces-fill { position:absolute; top:0; left:0; bottom:0; width:var(--oces-fill,11px);
   border-radius:${KNOB / 2}px 0 0 ${KNOB / 2}px; background:var(--oces-fill-bg,#4d93f8);
   overflow:hidden; pointer-events:none; }
@@ -68,13 +81,26 @@ const CSS = `
 .oces-knob { position:absolute; top:50%; left:var(--oces-fill,11px); width:${KNOB}px; height:${KNOB}px;
   margin:${-KNOB / 2}px 0 0 ${-KNOB / 2}px; border-radius:50%; background:#fff; pointer-events:none;
   box-shadow:0 1px 5px rgba(0,0,0,.34), 0 0 0 .5px rgba(0,0,0,.06); }
-.oces-value { display:inline-flex; align-items:center; justify-content:flex-start; width:3.6em; flex:0 0 3.6em;
+.oces-value { display:inline-flex; align-items:center; justify-content:flex-start; width:auto; flex:0 0 auto;
   height:16px; overflow:hidden; }
-.oces-value-text { display:inline-block; font-size:12px; font-weight:600; line-height:16px; white-space:nowrap;
-  transform-origin:50% 80%; }
+.oces-value-text { position:relative; z-index:1; display:inline-block; font-size:12px; font-weight:600; line-height:16px;
+  white-space:nowrap; transform-origin:50% 80%; }
+.oces-value-text::after { content:""; position:absolute; top:50%; left:50%; width:52px; height:26px; border-radius:999px;
+  transform:translate(-50%,-50%) scale(.6); pointer-events:none; opacity:0; z-index:-1;
+  background:radial-gradient(ellipse at center, var(--oces-glow-color, rgba(168,85,247,.85)) 0%, var(--oces-glow-color, rgba(168,85,247,.45)) 45%, rgba(168,85,247,0) 75%);
+  filter:blur(8px); }
 @keyframes oces-text-rise { 0%{transform:translateY(85%) scale(.96);opacity:0} 55%{opacity:1}
   80%{transform:translateY(-6%) scale(1.01)} 100%{transform:translateY(0) scale(1);opacity:1} }
+@keyframes oces-glow-flash { 0%{opacity:.95;transform:translate(-50%,-50%) scale(.65);filter:blur(6px)}
+  25%{opacity:1;transform:translate(-50%,-50%) scale(1.15);filter:blur(8px)}
+  100%{opacity:0;transform:translate(-50%,-50%) scale(1.5);filter:blur(14px)} }
+@keyframes oces-text-bloom { 0%{text-shadow:0 0 8px var(--oces-glow-color,#c084fc)}
+  30%{text-shadow:0 0 14px var(--oces-glow-color,#c084fc),0 0 3px #fff} 100%{text-shadow:none} }
 .oces-value-text.oces-text-rise { animation:oces-text-rise .3s cubic-bezier(.2,.85,.25,1); }
+.oces-value-text.is-glowing { animation:oces-text-bloom .4s cubic-bezier(.16,1,.3,1) forwards; }
+.oces-value-text.is-glowing::after { animation:oces-glow-flash .4s cubic-bezier(.16,1,.3,1) forwards; }
+.oces-value-text.oces-text-rise.is-glowing {
+  animation:oces-text-rise .3s cubic-bezier(.2,.85,.25,1), oces-text-bloom .4s cubic-bezier(.16,1,.3,1) forwards; }
 .oces-native-effort { color: var(--oces-native-color) !important; }
 [data-component="composer"] .composer-variant-default {
   opacity: 1 !important;
@@ -97,7 +123,8 @@ const CSS = `
 @keyframes oces-sweep { 0%{transform:translateX(100%)} 100%{transform:translateX(-100%)} }
 @keyframes oces-star-sweep { 0%{transform:translate3d(0,0,0);opacity:0} 6%{opacity:1} 94%{opacity:1} 100%{transform:translate3d(-100%,0,0);opacity:0} }
 @media (prefers-reduced-motion: reduce) {
-  .oces-sweep, .oces-star, .oces-value-text.oces-text-rise { animation:none !important; }
+  .oces-sweep, .oces-star, .oces-value-text.oces-text-rise, .oces-value-text.is-glowing { animation:none !important; }
+  .oces-value-text.is-glowing::after { animation:none !important; }
   .oces-track:not(.is-dragging) .oces-fill, .oces-track:not(.is-dragging) .oces-knob { transition:none; }
 }
 `
@@ -616,18 +643,49 @@ function Slider(props: { context: any }) {
   const labelColor = createMemo(() =>
     isDefaultLevel(current()) ? colorForVariant("default", variants()) : valueColorFor(pct(), off()),
   )
+  const atMax = createMemo(() => {
+    const list = ladder()
+    return list.length > 1 && index() === list.length - 1 && !isOffLevel(current()) && !isDefaultLevel(current())
+  })
+  const ringStyle = createMemo(() => {
+    const hex = labelColor()
+    const e = energy()
+    if (!hex) {
+      return {
+        "--oces-ring": "rgba(96,96,112,.45)",
+        "--oces-ring-glow": "transparent",
+        "--oces-ring-blur": "0px",
+        "--oces-ring-spread": "0px",
+        "--oces-ring-fill": "rgba(16,16,22,.32)",
+        "--oces-fill-glow": "transparent",
+      } as Record<string, string>
+    }
+    return {
+      "--oces-ring": hexToRgba(hex, 0.42),
+      "--oces-ring-glow": e > 0 ? hexToRgba(hex, 0.22 + 0.23 * e) : "transparent",
+      "--oces-ring-blur": e > 0 ? `${(8 + 6 * e).toFixed(1)}px` : "0px",
+      "--oces-ring-spread": e > 0 ? "-4px" : "0px",
+      "--oces-ring-fill": hexToRgba(hex, 0.04 + 0.02 * e),
+      "--oces-fill-glow": e > 0 ? hexToRgba(fillColorFor(pct()), 0.5) : "transparent",
+    } as Record<string, string>
+  })
   let valueNode: HTMLSpanElement | undefined
   let seenLabel = false
   createEffect(() => {
     const text = label()
+    const max = atMax()
+    const glow = labelColor()
     if (!valueNode || !text) return
     if (!seenLabel) {
       seenLabel = true
       return
     }
-    valueNode.classList.remove("oces-text-rise")
+    valueNode.classList.remove("oces-text-rise", "is-glowing")
     void valueNode.offsetWidth
     valueNode.classList.add("oces-text-rise")
+    if (!max) return
+    valueNode.style.setProperty("--oces-glow-color", hexToRgba(glow || "#a855f7", 0.9))
+    valueNode.classList.add("is-glowing")
   })
 
   createEffect(() => {
@@ -696,7 +754,7 @@ function Slider(props: { context: any }) {
 
   return (
     <Show when={variants().length > 0}>
-      <div class="oces">
+      <div class="oces" style={ringStyle()}>
         <div
           ref={track}
           class={`oces-track${dragging() ? " is-dragging" : ""}`}
@@ -712,6 +770,7 @@ function Slider(props: { context: any }) {
             "--oces-fill-bg": fillBackgroundFor(pct()),
             "--oces-energy": String(energy()),
             "--oces-star-opacity": String(starLayerOpacityFor(pct())),
+            "--oces-fill-glow": ringStyle()["--oces-fill-glow"],
           }}
           onPointerDown={onPointerDown}
           onPointerMove={onPointerMove}
