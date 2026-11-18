@@ -21,6 +21,7 @@ import {
   nativeEffortValue,
   normalizeEffortId,
   orderVariants,
+  rankOf,
   sameEffort,
   pickListedModel,
   PARTICLES,
@@ -71,7 +72,7 @@ const CSS = `
 .oces-track { position:relative; width:118px; flex:0 0 118px; height:${KNOB}px; border-radius:999px; cursor:pointer;
   touch-action:none; background:rgba(128,128,145,.18); transition:box-shadow .2s ease;
   box-shadow:inset 0 1px 2px rgba(0,0,0,.28), inset 0 0 0 1px rgba(255,255,255,.06); }
-.oces-track[data-energy="1"] { box-shadow:0 0 calc(var(--oces-energy,0) * 22px) var(--oces-fill-glow, rgba(168,85,247,1)), inset 0 1px 2px rgba(0,0,0,.24); }
+.oces-track[data-energy="1"] { box-shadow:0 0 var(--oces-fill-blur, 0px) var(--oces-fill-glow, rgba(168,85,247,1)), inset 0 1px 2px rgba(0,0,0,.24); }
 .oces-fill { position:absolute; top:0; left:0; bottom:0; width:var(--oces-fill,11px);
   border-radius:${KNOB / 2}px 0 0 ${KNOB / 2}px; background:var(--oces-fill-bg,#4d93f8);
   overflow:hidden; pointer-events:none; }
@@ -97,8 +98,7 @@ const CSS = `
 .oces-value { display:inline-flex; align-items:center; justify-content:flex-start; width:auto; flex:0 0 auto;
   height:16px; }
 .oces-value-text { position:relative; z-index:1; display:inline-block; font-size:12px; font-weight:600; line-height:16px;
-  white-space:nowrap; transform-origin:50% 80%;
-  text-shadow:0 0 var(--oces-text-glow, 0px) var(--oces-glow-color, transparent); }
+  white-space:nowrap; transform-origin:50% 80%; }
 .oces-value-text::after { content:""; position:absolute; top:50%; left:50%; width:54px; height:28px; border-radius:999px;
   transform:translate(-50%,-50%) scale(.55); pointer-events:none; opacity:0; z-index:-1;
   background:radial-gradient(ellipse at center, var(--oces-glow-color, rgba(168,85,247,.85)) 0%, var(--oces-glow-color, rgba(168,85,247,.45)) 42%, rgba(168,85,247,0) 72%);
@@ -661,28 +661,36 @@ function Slider(props: { context: any }) {
     const list = ladder()
     return list.length > 1 && index() === list.length - 1 && !isOffLevel(current()) && !isDefaultLevel(current())
   })
+  const glowStrength = createMemo(() => {
+    const id = current()
+    if (isDefaultLevel(id) || isOffLevel(id)) return 0
+    const rank = rankOf(id)
+    if (rank <= 2) return 0
+    if (rank >= 6) return 1
+    return (rank - 2) / 4
+  })
   const ringStyle = createMemo(() => {
     const hex = labelColor()
-    const e = energy()
-    if (!hex) {
+    const s = glowStrength()
+    if (!hex || s <= 0) {
       return {
-        "--oces-ring": "rgba(96,96,112,.45)",
+        "--oces-ring": hex ? hexToRgba(hex, 0.42) : "rgba(96,96,112,.45)",
         "--oces-ring-glow": "transparent",
         "--oces-ring-blur": "0px",
         "--oces-ring-spread": "0px",
-        "--oces-ring-fill": "rgba(16,16,22,.32)",
+        "--oces-ring-fill": hex ? hexToRgba(hex, 0.04) : "rgba(16,16,22,.32)",
         "--oces-fill-glow": "transparent",
+        "--oces-fill-blur": "0px",
       } as Record<string, string>
     }
     return {
       "--oces-ring": hexToRgba(hex, 0.42),
-      "--oces-ring-glow": e > 0 ? hexToRgba(hex, Math.min(1, (0.22 + 0.23 * e) * 4)) : "transparent",
-      "--oces-ring-blur": e > 0 ? `${(5 + 8 * e).toFixed(1)}px` : "0px",
-      "--oces-ring-spread": e > 0 ? "-4px" : "0px",
-      "--oces-ring-fill": hexToRgba(hex, 0.04 + 0.02 * e),
-      "--oces-fill-glow": e > 0 ? hexToRgba(liftHex(fillColorFor(pct()), 0.55), 1) : "transparent",
-      "--oces-text-glow": e > 0 ? `${(1.5 + 4 * e).toFixed(1)}px` : "0px",
-      "--oces-glow-color": hexToRgba(liftHex(hex, 0.25), Math.min(1, 0.45 + 0.5 * e)),
+      "--oces-ring-glow": hexToRgba(hex, 0.55 + 0.45 * s),
+      "--oces-ring-blur": `${(6 + 9 * s).toFixed(1)}px`,
+      "--oces-ring-spread": "-4px",
+      "--oces-ring-fill": hexToRgba(hex, 0.04 + 0.02 * s),
+      "--oces-fill-glow": hexToRgba(liftHex(fillColorFor(pct()), 0.55), 0.9),
+      "--oces-fill-blur": `${(8 + 14 * s).toFixed(1)}px`,
     } as Record<string, string>
   })
   let valueNode: HTMLSpanElement | undefined
@@ -780,7 +788,7 @@ function Slider(props: { context: any }) {
         <div
           ref={track}
           class={`oces-track${dragging() ? " is-dragging" : ""}`}
-          data-energy={energy() > 0 ? "1" : "0"}
+          data-energy={glowStrength() > 0 ? "1" : "0"}
           role="slider"
           aria-label="Thinking intensity"
           aria-valuemin={0}
@@ -793,6 +801,7 @@ function Slider(props: { context: any }) {
             "--oces-energy": String(energy()),
             "--oces-star-opacity": String(starLayerOpacityFor(pct())),
             "--oces-fill-glow": ringStyle()["--oces-fill-glow"],
+            "--oces-fill-blur": ringStyle()["--oces-fill-blur"],
           }}
           onPointerDown={onPointerDown}
           onPointerMove={onPointerMove}
@@ -836,11 +845,7 @@ function Slider(props: { context: any }) {
           <span
             ref={valueNode}
             class="oces-value-text"
-            style={{
-              color: labelColor() || undefined,
-              "--oces-text-glow": ringStyle()["--oces-text-glow"],
-              "--oces-glow-color": ringStyle()["--oces-glow-color"],
-            }}
+            style={{ color: labelColor() || undefined }}
           >
             {label()}
           </span>
