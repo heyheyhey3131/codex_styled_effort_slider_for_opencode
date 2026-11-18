@@ -151,7 +151,8 @@ export function normalizeEffortId(id) {
 
 const EFFORT_ALIAS = Object.freeze({
   default: ["default", "auto", "reset", "默认", "預設", "预设"],
-  off: ["off", "none", "disable", "disabled", "关闭", "關閉", "无", "無"],
+  none: ["none"],
+  off: ["off", "disable", "disabled", "关闭", "關閉", "无", "無"],
   minimal: ["minimal", "min", "最低"],
   low: ["low", "低"],
   medium: ["medium", "med", "中"],
@@ -174,21 +175,26 @@ export function sameEffort(a, b) {
   return canonicalEffort(a) === canonicalEffort(b)
 }
 
+export function resolveEffortId(id, variants) {
+  if (isDefaultLevel(id)) return undefined
+  const list = effortLadder(variants)
+  const hit = list.find((item) => !isDefaultLevel(item) && sameEffort(item, id))
+  return hit ? String(hit) : undefined
+}
+
 export function effortAllowed(id, variants) {
   if (isDefaultLevel(id)) return true
-  const list = effortLadder(variants)
-  return list.length > 0 && currentIndex(list, id) >= 0
+  return resolveEffortId(id, variants) != null
 }
 
 export function clampEffort(id, variants) {
-  if (isDefaultLevel(id) || effortAllowed(id, variants)) {
-    return isDefaultLevel(id) ? undefined : normalizeEffortId(id)
-  }
-  return undefined
+  if (isDefaultLevel(id)) return undefined
+  return resolveEffortId(id, variants)
 }
 
 export function nativeEffortValue(id) {
-  return canonicalEffort(id)
+  if (isDefaultLevel(id)) return "default"
+  return String(normalizeEffortId(id) ?? canonicalEffort(id))
 }
 
 export function effortLadder(ids) {
@@ -301,8 +307,7 @@ export function currentIndex(variants, current) {
     const index = variants.findIndex((id) => isDefaultLevel(id))
     return index
   }
-  const needle = String(current).toLowerCase()
-  return variants.findIndex((id) => String(id).toLowerCase() === needle)
+  return variants.findIndex((id) => sameEffort(id, current))
 }
 
 export function pctFromIndex(index, count) {

@@ -200,7 +200,7 @@ function paintNativeEffort(variants: string[], current?: string) {
     if (!composer) continue
     button.classList.add("oces-native-trigger")
     ensureChevron(button)
-    syncNativeTriggerLabel(id)
+    if (!effortAllowed(text, variants)) syncNativeTriggerLabel(id)
   }
   const items = document.querySelectorAll('[role="menuitem"],[role="option"],[role="menuitemradio"],[role="menuitemcheckbox"]')
   for (const item of items) {
@@ -388,7 +388,6 @@ function syncNativeTriggerLabel(id: string | undefined) {
 function applyNativeEffort(id: string | undefined) {
   const trigger = findNativeEffortTrigger()
   if (!trigger) return false
-  syncNativeTriggerLabel(id)
   if (nativeEffortMatches(id)) return true
   if (applyingNative) return waitAndSelectNative(id)
   applyingNative = true

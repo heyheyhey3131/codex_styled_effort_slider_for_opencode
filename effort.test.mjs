@@ -9,6 +9,7 @@ import {
   COLOR_VIOLET,
   energyColorAt,
   clampEffort,
+  canonicalEffort,
   colorForVariant,
   currentIndex,
   effortAllowed,
@@ -28,6 +29,7 @@ import {
   indexFromPct,
   isDefaultLevel,
   isOffLevel,
+  nativeEffortValue,
   normalizeEffortId,
   orderVariants,
   sameEffort,
@@ -206,6 +208,21 @@ test("Default matches the slider unset color instead of ranking as an unknown ma
   assert.notEqual(unset, colorForVariant("xhigh", variants))
   assert.equal(currentIndex(effortLadder(variants), undefined), 0)
   assert.equal(stepVariant(effortLadder(variants), undefined, 1), "low")
+})
+
+test("none is a selectable level, not an alias of off or default", () => {
+  const variants = ["none", "low", "high"]
+  assert.equal(canonicalEffort("none"), "none")
+  assert.equal(sameEffort("none", "off"), false)
+  assert.equal(sameEffort("none", "default"), false)
+  assert.equal(effortAllowed("none", variants), true)
+  assert.equal(clampEffort("none", variants), "none")
+  assert.equal(nativeEffortValue("none"), "none")
+  assert.equal(normalizeEffortId("none"), "none")
+  assert.deepEqual(effortLadder(variants), ["default", "none", "low", "high"])
+  assert.equal(currentIndex(effortLadder(variants), "none"), 1)
+  assert.equal(stepVariant(effortLadder(variants), "default", 1), "none")
+  assert.equal(displayLabel("none"), "None")
 })
 
 test("switching models drops effort levels the new model does not have", () => {
