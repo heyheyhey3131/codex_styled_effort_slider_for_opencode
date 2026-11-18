@@ -501,12 +501,15 @@ function Slider(props: { context: any }) {
   const [pending, setPending] = createSignal<string | undefined | typeof UNSET>(UNSET)
   const [nonce, setNonce] = createSignal(0)
   const [boundKey, setBoundKey] = createSignal("")
+  const [nativeTick, setNativeTick] = createSignal(0)
+  let lastNative = ""
   let track: HTMLDivElement | undefined
 
   const session = () => props.context.sessions.current()
   const composer = () => props.context.screen.current()?.composer
   const model = () => composer()?.model()
   const rawCurrent = () => {
+    nativeTick()
     const hold = pending()
     if (hold !== UNSET) return hold
     if (model()) return model()?.variant
@@ -609,8 +612,16 @@ function Slider(props: { context: any }) {
 
   createEffect(() => {
     const list = variants()
-    const id = current()
-    const paint = () => paintNativeEffort(list, id)
+    const paint = () => {
+      const native = scrapeEffortLabel()
+      if (native && !sameEffort(native, lastNative)) {
+        lastNative = native
+        const hold = pending()
+        if (hold !== UNSET && !sameEffort(hold, native)) setPending(UNSET)
+        setNativeTick((value) => value + 1)
+      }
+      paintNativeEffort(list, current())
+    }
     paint()
     const observer = new MutationObserver(paint)
     observer.observe(document.body, { childList: true, subtree: true, characterData: true })
