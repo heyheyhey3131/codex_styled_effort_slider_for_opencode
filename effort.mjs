@@ -174,6 +174,19 @@ export function sameEffort(a, b) {
   return canonicalEffort(a) === canonicalEffort(b)
 }
 
+export function effortAllowed(id, variants) {
+  if (isDefaultLevel(id)) return true
+  const list = effortLadder(variants)
+  return list.length > 0 && currentIndex(list, id) >= 0
+}
+
+export function clampEffort(id, variants) {
+  if (isDefaultLevel(id) || effortAllowed(id, variants)) {
+    return isDefaultLevel(id) ? undefined : normalizeEffortId(id)
+  }
+  return undefined
+}
+
 export function nativeEffortValue(id) {
   return canonicalEffort(id)
 }

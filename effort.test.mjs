@@ -8,8 +8,10 @@ import {
   COLOR_TEXT_VIOLET,
   COLOR_VIOLET,
   energyColorAt,
+  clampEffort,
   colorForVariant,
   currentIndex,
+  effortAllowed,
   detentTargetIndex,
   displayLabel,
   effortLadder,
@@ -204,6 +206,18 @@ test("Default matches the slider unset color instead of ranking as an unknown ma
   assert.notEqual(unset, colorForVariant("xhigh", variants))
   assert.equal(currentIndex(effortLadder(variants), undefined), 0)
   assert.equal(stepVariant(effortLadder(variants), undefined, 1), "low")
+})
+
+test("switching models drops effort levels the new model does not have", () => {
+  const step = ["low", "medium", "high"]
+  const grok = ["low", "high", "xhigh"]
+  assert.equal(effortAllowed("xhigh", grok), true)
+  assert.equal(effortAllowed("xhigh", step), false)
+  assert.equal(clampEffort("xhigh", grok), "xhigh")
+  assert.equal(clampEffort("xhigh", step), undefined)
+  assert.equal(clampEffort("high", step), "high")
+  assert.equal(clampEffort("Default", step), undefined)
+  assert.equal(displayLabel(clampEffort("xhigh", step)), "Default")
 })
 
 test("ladders keep only the model's own variants and never invent medium/xhigh/max", () => {

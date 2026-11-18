@@ -1,10 +1,12 @@
 /** @jsxImportSource @opentui/solid */
 import { Plugin, usePlugin } from "@opencode/plugin/tui"
-import { createMemo, Index } from "solid-js"
+import { createEffect, createMemo, Index } from "solid-js"
 import {
   barCells,
+  clampEffort,
   currentIndex,
   displayLabel,
+  effortAllowed,
   effortLadder,
   idsFromVariants,
   isDefaultLevel,
@@ -35,7 +37,13 @@ function listVariants(context: ReturnType<typeof usePlugin>) {
 function useEffort() {
   const context = usePlugin()
   const variants = createMemo(() => listVariants(context))
-  const selected = createMemo(() => context.ui.model.current()?.variant)
+  const selected = createMemo(() => clampEffort(context.ui.model.current()?.variant, variants()))
+  createEffect(() => {
+    const list = variants()
+    const raw = context.ui.model.current()?.variant
+    if (list.length === 0 || effortAllowed(raw, list)) return
+    context.ui.model.variant.set(undefined)
+  })
   const index = createMemo(() => currentIndex(variants(), selected()))
   const pct = createMemo(() => pctFromIndex(index() < 0 ? 0 : index(), variants().length))
   const apply = (id: string | undefined, toast = false) => {

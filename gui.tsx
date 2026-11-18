@@ -4,8 +4,10 @@ import { Portal } from "solid-js/web"
 import { Command, Plugin, Slot, Style } from "@opencode/plugin/gui"
 import {
   clamp01,
+  clampEffort,
   colorForVariant,
   currentIndex,
+  effortAllowed,
   detentTargetIndex,
   displayLabel,
   effortLadder,
@@ -191,7 +193,7 @@ function paintNativeEffort(variants: string[], current?: string) {
     const text = effortText(button)
     if (!EFFORT_RE.test(text)) continue
     const composer = isComposerEffortButton(button, send)
-    const id = composer ? current || text : text
+    const id = composer ? (effortAllowed(current, variants) ? current : "default") : text
     const color = colorForVariant(id, composer ? fallback : ladderFor(button, fallback))
     paintLabels(button, color, keep)
     keep.add(button)
@@ -527,12 +529,24 @@ function Slider(props: { context: any }) {
   const session = () => props.context.sessions.current()
   const composer = () => props.context.screen.current()?.composer
   const model = () => composer()?.model()
-  const current = () => {
+  const rawCurrent = () => {
     const hold = pending()
-    if (hold !== UNSET) return hold ?? "default"
+    if (hold !== UNSET) return hold
     if (model()) return model()?.variant
     return scrapeEffortLabel()
   }
+  const current = () => clampEffort(rawCurrent(), variants())
+
+  createEffect(() => {
+    const key = selectionKey(model())
+    const prev = boundKey()
+    if (!key || !prev || key === prev) return
+    setPending(UNSET)
+    setVariants([])
+    setBoundKey(key)
+    syncNativeTriggerLabel(undefined)
+    composer()?.setVariant?.(undefined)
+  })
 
   createEffect(() => {
     const selected = model()
@@ -545,8 +559,17 @@ function Slider(props: { context: any }) {
         if (cancelled) return
         const found = resolveListedModel(listed, selected)
         const next = variantIds(found)
+        const key = selectionKey(selected) || (found ? `${found.providerID || ""}::${found.id || found.modelID || ""}` : "")
+        const modelChanged = Boolean(key && boundKey() && key !== boundKey())
+        if (modelChanged) setPending(UNSET)
         setVariants((prev) => (prev.join("\0") === next.join("\0") ? prev : next))
-        setBoundKey(selectionKey(selected) || (found ? `${found.providerID || ""}::${found.id || found.modelID || ""}` : ""))
+        setBoundKey(key)
+        const raw = modelChanged ? selected?.variant : pending() !== UNSET ? pending() : selected?.variant ?? scrapeEffortLabel()
+        if (next.length && !effortAllowed(raw, next)) {
+          setPending(UNSET)
+          applyComposerVariant(composer(), undefined)
+          syncNativeTriggerLabel(undefined)
+        }
       } catch {
         if (!cancelled && !boundKey()) setVariants([])
       }
@@ -562,6 +585,11 @@ function Slider(props: { context: any }) {
       if (key !== boundKey() || variants().length === 0) setNonce((value) => value + 1)
       const hold = pending()
       if (hold === UNSET || dragging()) return
+      if (!effortAllowed(hold, variants())) {
+        setPending(UNSET)
+        applyComposerVariant(composer(), undefined)
+        return
+      }
       const view = composer()
       const next = normalizeEffortId(hold)
       if (view?.setVariant && view.setVariant(next) !== false) setPending(UNSET)
@@ -573,6 +601,11 @@ function Slider(props: { context: any }) {
   createEffect(() => {
     const hold = pending()
     if (hold === UNSET || dragging()) return
+    if (!effortAllowed(hold, variants())) {
+      setPending(UNSET)
+      applyComposerVariant(composer(), undefined)
+      return
+    }
     const view = composer()
     const next = normalizeEffortId(hold)
     if (view?.setVariant && view.setVariant(next) !== false) {
