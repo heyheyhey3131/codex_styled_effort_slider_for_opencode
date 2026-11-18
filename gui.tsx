@@ -43,6 +43,18 @@ function hexToRgba(hex: string, alpha: number) {
   return `rgba(${(n >> 16) & 255},${(n >> 8) & 255},${n & 255},${Math.round(a * 1000) / 1000})`
 }
 
+function liftHex(hex: string, amount = 0.5) {
+  const clean = String(hex || "").replace("#", "")
+  if (clean.length < 6) return "#a78bfa"
+  const n = Number.parseInt(clean, 16)
+  const t = Math.max(0, Math.min(1, amount))
+  const mix = (c: number) => Math.round(c + (255 - c) * t)
+  const r = mix((n >> 16) & 255)
+  const g = mix((n >> 8) & 255)
+  const b = mix(n & 255)
+  return `#${((1 << 24) | (r << 16) | (g << 8) | b).toString(16).slice(1)}`
+}
+
 const CSS = `
 .oces-dock { display:none !important; }
 .oces-host { display:inline-flex; align-items:center; justify-content:flex-start; flex:0 0 auto; width:188px;
@@ -59,7 +71,7 @@ const CSS = `
 .oces-track { position:relative; width:118px; flex:0 0 118px; height:${KNOB}px; border-radius:999px; cursor:pointer;
   touch-action:none; background:rgba(128,128,145,.18); transition:box-shadow .2s ease;
   box-shadow:inset 0 1px 2px rgba(0,0,0,.28), inset 0 0 0 1px rgba(255,255,255,.06); }
-.oces-track[data-energy="1"] { box-shadow:0 0 calc(var(--oces-energy,0) * 80px) var(--oces-fill-glow, rgba(168,85,247,1)), inset 0 1px 2px rgba(0,0,0,.24); }
+.oces-track[data-energy="1"] { box-shadow:0 0 calc(var(--oces-energy,0) * 22px) var(--oces-fill-glow, rgba(168,85,247,1)), inset 0 1px 2px rgba(0,0,0,.24); }
 .oces-fill { position:absolute; top:0; left:0; bottom:0; width:var(--oces-fill,11px);
   border-radius:${KNOB / 2}px 0 0 ${KNOB / 2}px; background:var(--oces-fill-bg,#4d93f8);
   overflow:hidden; pointer-events:none; }
@@ -85,16 +97,17 @@ const CSS = `
 .oces-value { display:inline-flex; align-items:center; justify-content:flex-start; width:auto; flex:0 0 auto;
   height:16px; }
 .oces-value-text { position:relative; z-index:1; display:inline-block; font-size:12px; font-weight:600; line-height:16px;
-  white-space:nowrap; transform-origin:50% 80%; }
-.oces-value-text::after { content:""; position:absolute; top:50%; left:50%; width:74px; height:38px; border-radius:999px;
+  white-space:nowrap; transform-origin:50% 80%;
+  text-shadow:0 0 var(--oces-text-glow, 0px) var(--oces-glow-color, transparent); }
+.oces-value-text::after { content:""; position:absolute; top:50%; left:50%; width:54px; height:28px; border-radius:999px;
   transform:translate(-50%,-50%) scale(.55); pointer-events:none; opacity:0; z-index:-1;
   background:radial-gradient(ellipse at center, var(--oces-glow-color, rgba(168,85,247,.85)) 0%, var(--oces-glow-color, rgba(168,85,247,.45)) 42%, rgba(168,85,247,0) 72%);
-  filter:blur(10px); }
+  filter:blur(7px); }
 @keyframes oces-text-rise { 0%{transform:translateY(85%) scale(.96);opacity:0} 55%{opacity:1}
   80%{transform:translateY(-6%) scale(1.01)} 100%{transform:translateY(0) scale(1);opacity:1} }
-@keyframes oces-glow-flash { 0%{opacity:.95;transform:translate(-50%,-50%) scale(.6);filter:blur(7px)}
-  22%{opacity:1;transform:translate(-50%,-50%) scale(1.25);filter:blur(10px)}
-  100%{opacity:0;transform:translate(-50%,-50%) scale(1.9);filter:blur(20px)} }
+@keyframes oces-glow-flash { 0%{opacity:.95;transform:translate(-50%,-50%) scale(.6);filter:blur(5px)}
+  22%{opacity:1;transform:translate(-50%,-50%) scale(1.1);filter:blur(7px)}
+  100%{opacity:0;transform:translate(-50%,-50%) scale(1.45);filter:blur(13px)} }
 @keyframes oces-text-bloom { 0%{text-shadow:0 0 8px var(--oces-glow-color,#c084fc)}
   30%{text-shadow:0 0 14px var(--oces-glow-color,#c084fc),0 0 3px #fff} 100%{text-shadow:none} }
 .oces-value-text.oces-text-rise { animation:oces-text-rise .3s cubic-bezier(.2,.85,.25,1); }
@@ -663,15 +676,18 @@ function Slider(props: { context: any }) {
     }
     return {
       "--oces-ring": hexToRgba(hex, 0.42),
-      "--oces-ring-glow": e > 0 ? hexToRgba(hex, Math.min(1, (0.22 + 0.23 * e) * 5)) : "transparent",
-      "--oces-ring-blur": e > 0 ? `${((8 + 6 * e) * 5).toFixed(1)}px` : "0px",
+      "--oces-ring-glow": e > 0 ? hexToRgba(hex, Math.min(1, (0.22 + 0.23 * e) * 4)) : "transparent",
+      "--oces-ring-blur": e > 0 ? `${(5 + 8 * e).toFixed(1)}px` : "0px",
       "--oces-ring-spread": e > 0 ? "-4px" : "0px",
       "--oces-ring-fill": hexToRgba(hex, 0.04 + 0.02 * e),
-      "--oces-fill-glow": e > 0 ? hexToRgba(fillColorFor(pct()), 1) : "transparent",
+      "--oces-fill-glow": e > 0 ? hexToRgba(liftHex(fillColorFor(pct()), 0.55), 1) : "transparent",
+      "--oces-text-glow": e > 0 ? `${(1.5 + 4 * e).toFixed(1)}px` : "0px",
+      "--oces-glow-color": hexToRgba(liftHex(hex, 0.25), Math.min(1, 0.45 + 0.5 * e)),
     } as Record<string, string>
   })
   let valueNode: HTMLSpanElement | undefined
   let seenLabel = false
+  let glowTimer = 0
   createEffect(() => {
     const text = label()
     const max = atMax()
@@ -685,8 +701,13 @@ function Slider(props: { context: any }) {
     void valueNode.offsetWidth
     valueNode.classList.add("oces-text-rise")
     if (!max) return
-    valueNode.style.setProperty("--oces-glow-color", hexToRgba(glow || "#a855f7", 0.9))
+    valueNode.style.setProperty("--oces-glow-color", hexToRgba(liftHex(glow || "#a855f7", 0.25), 0.95))
     valueNode.classList.add("is-glowing")
+    if (glowTimer) window.clearTimeout(glowTimer)
+    glowTimer = window.setTimeout(() => {
+      valueNode?.classList.remove("is-glowing")
+      glowTimer = 0
+    }, 460)
   })
 
   createEffect(() => {
@@ -812,7 +833,15 @@ function Slider(props: { context: any }) {
           <div class="oces-knob" />
         </div>
         <span class="oces-value">
-          <span ref={valueNode} class="oces-value-text" style={{ color: labelColor() || undefined }}>
+          <span
+            ref={valueNode}
+            class="oces-value-text"
+            style={{
+              color: labelColor() || undefined,
+              "--oces-text-glow": ringStyle()["--oces-text-glow"],
+              "--oces-glow-color": ringStyle()["--oces-glow-color"],
+            }}
+          >
             {label()}
           </span>
         </span>
