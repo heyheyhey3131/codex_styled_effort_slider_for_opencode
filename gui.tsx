@@ -21,7 +21,6 @@ import {
   nativeEffortValue,
   normalizeEffortId,
   orderVariants,
-  rankOf,
   sameEffort,
   pickListedModel,
   PARTICLES,
@@ -35,6 +34,8 @@ import {
 } from "./effort.mjs"
 
 const KNOB = 16
+/** Peak glow, matched to what Grok 4.6's Xhigh tier looked like before. */
+const GLOW_MAX = 0.75
 
 function hexToRgba(hex: string, alpha: number) {
   const clean = String(hex || "").replace("#", "")
@@ -664,10 +665,14 @@ function Slider(props: { context: any }) {
   const glowStrength = createMemo(() => {
     const id = current()
     if (isDefaultLevel(id) || isOffLevel(id)) return 0
-    const rank = rankOf(id)
-    if (rank <= 2) return 0
-    if (rank >= 6) return 1
-    return (rank - 2) / 4
+    const list = ladder().filter((item) => !isDefaultLevel(item))
+    const at = list.findIndex((item) => sameEffort(item, id))
+    if (at < 0 || list.length < 2) return 0
+    const lowAt = list.findIndex((item) => sameEffort(item, "low"))
+    const base = lowAt >= 0 ? lowAt : 0
+    const span = list.length - 1 - base
+    if (span <= 0 || at <= base) return 0
+    return GLOW_MAX * ((at - base) / span)
   })
   const ringStyle = createMemo(() => {
     const hex = labelColor()
