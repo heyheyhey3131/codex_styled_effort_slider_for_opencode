@@ -694,8 +694,8 @@ function Slider(props: { context: any }) {
       "--oces-ring-blur": `${(6 + 9 * s).toFixed(1)}px`,
       "--oces-ring-spread": "-4px",
       "--oces-ring-fill": hexToRgba(hex, 0.04 + 0.02 * s),
-      "--oces-fill-glow": hexToRgba(liftHex(fillColorFor(pct()), 0.55), 0.9),
-      "--oces-fill-blur": `${(8 + 14 * s).toFixed(1)}px`,
+      "--oces-fill-glow": hexToRgba(liftHex(fillColorFor(pct()), 0.5), 0.62 + 0.14 * s),
+      "--oces-fill-blur": `${(4 + 6 * s).toFixed(1)}px`,
     } as Record<string, string>
   })
   let valueNode: HTMLSpanElement | undefined
