@@ -149,10 +149,33 @@ export function normalizeEffortId(id) {
   return id == null ? undefined : String(id)
 }
 
+const EFFORT_ALIAS = Object.freeze({
+  default: ["default", "auto", "reset", "默认", "預設", "预设"],
+  off: ["off", "none", "disable", "disabled", "关闭", "關閉", "无", "無"],
+  minimal: ["minimal", "min", "最低"],
+  low: ["low", "低"],
+  medium: ["medium", "med", "中"],
+  high: ["high", "高"],
+  xhigh: ["xhigh", "x-high", "extra", "极高", "極高"],
+  max: ["max", "maximum", "ultra", "最大"],
+})
+
+export function canonicalEffort(id) {
+  if (isDefaultLevel(id)) return "default"
+  const key = String(id ?? "").trim().toLowerCase()
+  if (!key) return "default"
+  for (const [name, aliases] of Object.entries(EFFORT_ALIAS)) {
+    if (aliases.some((alias) => alias.toLowerCase() === key)) return name
+  }
+  return key
+}
+
 export function sameEffort(a, b) {
-  const left = isDefaultLevel(a) ? "default" : String(a ?? "").trim().toLowerCase()
-  const right = isDefaultLevel(b) ? "default" : String(b ?? "").trim().toLowerCase()
-  return left === right
+  return canonicalEffort(a) === canonicalEffort(b)
+}
+
+export function nativeEffortValue(id) {
+  return canonicalEffort(id)
 }
 
 export function effortLadder(ids) {

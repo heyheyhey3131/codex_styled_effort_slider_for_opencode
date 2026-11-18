@@ -194,6 +194,7 @@ test("Default matches the slider unset color instead of ranking as an unknown ma
   assert.equal(normalizeEffortId("default"), undefined)
   assert.equal(sameEffort(undefined, "Default"), true)
   assert.equal(sameEffort("high", "High"), true)
+  assert.equal(sameEffort("high", "高"), true)
   assert.equal(sameEffort("high", "low"), false)
   assert.deepEqual(effortLadder(variants), ["default", "low", "medium", "high", "xhigh"])
   assert.equal(unset, rgbHex(COLOR_BLUE))

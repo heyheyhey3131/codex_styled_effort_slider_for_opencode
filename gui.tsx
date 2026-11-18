@@ -15,6 +15,7 @@ import {
   isDefaultLevel,
   isOffLevel,
   matchModelFromLabels,
+  nativeEffortValue,
   normalizeEffortId,
   orderVariants,
   sameEffort,
@@ -197,6 +198,7 @@ function paintNativeEffort(variants: string[], current?: string) {
     if (!composer) continue
     button.classList.add("oces-native-trigger")
     ensureChevron(button)
+    syncNativeTriggerLabel(id)
   }
   const items = document.querySelectorAll('[role="menuitem"],[role="option"],[role="menuitemradio"],[role="menuitemcheckbox"]')
   for (const item of items) {
@@ -273,14 +275,19 @@ function findComposerFooter(composer = findVisibleComposer()) {
 }
 
 function findNativeEffortTrigger(composer = findVisibleComposer()) {
+  const painted =
+    composer?.querySelector(".oces-native-trigger") ?? document.querySelector(".oces-native-trigger")
+  if (painted) return painted
+  const classified = composer?.querySelector(".composer-variant-default")
+  if (classified) return classified.closest("button,[role='button']") ?? classified
   const controls = composer?.querySelector("[data-slot='composer-controls']")
   const roots = [controls, composer].filter(Boolean) as Element[]
   for (const root of roots) {
     for (const button of actionButtons(root)) {
       const text = effortText(button)
-      if (EFFORT_RE.test(text)) return button
+      if (EFFORT_RE.test(text) || /默认|預設|低|中|高/.test(text)) return button
       const label = `${button.getAttribute("aria-label") || ""} ${button.getAttribute("title") || ""}`.toLowerCase()
-      if (/variant|thinking|effort|intensity/.test(label)) return button
+      if (/variant|thinking|effort|intensity|变体|變體|思考/.test(label)) return button
     }
   }
   return undefined
@@ -288,19 +295,34 @@ function findNativeEffortTrigger(composer = findVisibleComposer()) {
 
 function effortMenuItems() {
   return Array.from(
-    document.querySelectorAll('[role="menuitem"],[role="option"],[role="menuitemradio"],[role="menuitemcheckbox"]'),
-  ).filter((item) => !item.closest(".oces") && EFFORT_RE.test(effortText(item)))
+    document.querySelectorAll(
+      '[role="menuitem"],[role="option"],[role="menuitemradio"],[role="menuitemcheckbox"],[role="radio"]',
+    ),
+  ).filter((item) => {
+    if (item.closest(".oces")) return false
+    const value = item.getAttribute("value") || item.getAttribute("data-value") || ""
+    const text = effortText(item)
+    return EFFORT_RE.test(text) || EFFORT_RE.test(value) || /默认|預設|低|中|高/.test(text)
+  })
 }
 
 function clickElement(node: Element) {
-  if (node instanceof HTMLElement) {
-    node.click()
-    return
-  }
-  node.dispatchEvent(new MouseEvent("click", { bubbles: true, cancelable: true, view: window }))
+  const target = node instanceof HTMLElement ? node : undefined
+  const origin = node.getBoundingClientRect()
+  const x = origin.left + Math.max(2, origin.width / 2)
+  const y = origin.top + Math.max(2, origin.height / 2)
+  const base = { bubbles: true, cancelable: true, view: window, clientX: x, clientY: y }
+  node.dispatchEvent(new PointerEvent("pointerdown", { ...base, pointerId: 1, pointerType: "mouse", isPrimary: true, buttons: 1 }))
+  node.dispatchEvent(new MouseEvent("mousedown", { ...base, buttons: 1 }))
+  node.dispatchEvent(new PointerEvent("pointerup", { ...base, pointerId: 1, pointerType: "mouse", isPrimary: true, buttons: 0 }))
+  node.dispatchEvent(new MouseEvent("mouseup", base))
+  if (target) target.click()
+  else node.dispatchEvent(new MouseEvent("click", base))
 }
 
 let applyingNative = false
+let nativeWait: MutationObserver | undefined
+let nativeWaitTimer = 0
 
 function nativeEffortMatches(id: string | undefined) {
   const trigger = findNativeEffortTrigger()
@@ -309,53 +331,98 @@ function nativeEffortMatches(id: string | undefined) {
 }
 
 function selectNativeEffortItem(id: string | undefined) {
-  const item = effortMenuItems().find((node) => sameEffort(effortText(node), id))
+  const want = nativeEffortValue(id)
+  const item = effortMenuItems().find((node) => {
+    const value = node.getAttribute("value") || node.getAttribute("data-value") || ""
+    return sameEffort(effortText(node), id) || sameEffort(value, id) || value === want
+  })
   if (!item) return false
   clickElement(item)
+  const inner = item.querySelector("span, div, p, bdi")
+  if (inner && inner !== item) clickElement(inner)
   return true
 }
 
-function applyNativeEffort(id: string | undefined) {
-  if (applyingNative) return nativeEffortMatches(id)
+function stopNativeWait() {
+  nativeWait?.disconnect()
+  nativeWait = undefined
+  if (nativeWaitTimer) window.clearTimeout(nativeWaitTimer)
+  nativeWaitTimer = 0
+}
+
+function waitAndSelectNative(id: string | undefined) {
+  stopNativeWait()
+  if (selectNativeEffortItem(id)) return true
+  nativeWait = new MutationObserver(() => {
+    if (selectNativeEffortItem(id) || nativeEffortMatches(id)) stopNativeWait()
+  })
+  nativeWait.observe(document.body, { childList: true, subtree: true })
+  nativeWaitTimer = window.setTimeout(() => stopNativeWait(), 600)
+  window.requestAnimationFrame(() => selectNativeEffortItem(id))
+  window.setTimeout(() => selectNativeEffortItem(id), 48)
+  return true
+}
+
+function syncNativeTriggerLabel(id: string | undefined) {
   const trigger = findNativeEffortTrigger()
   if (!trigger) return false
-  if (sameEffort(effortText(trigger), id)) return true
+  const raw = nativeEffortValue(id)
+  let changed = false
+  const visit = (node: Node) => {
+    if (node.nodeType === Node.TEXT_NODE) {
+      const text = (node.textContent || "").replace(/\s+/g, " ").trim()
+      if (text && (EFFORT_RE.test(text) || /默认|預設|低|中|高/.test(text)) && !sameEffort(text, id)) {
+        node.textContent = raw
+        changed = true
+      }
+      return
+    }
+    node.childNodes.forEach(visit)
+  }
+  visit(trigger)
+  return changed || sameEffort(effortText(trigger), id)
+}
+
+function applyNativeEffort(id: string | undefined) {
+  const trigger = findNativeEffortTrigger()
+  if (!trigger) return false
+  syncNativeTriggerLabel(id)
+  if (nativeEffortMatches(id)) return true
+  if (applyingNative) return waitAndSelectNative(id)
   applyingNative = true
-  const done = () => {
+  const finish = () => {
     applyingNative = false
   }
   if (selectNativeEffortItem(id)) {
-    done()
-    return true
+    syncNativeTriggerLabel(id)
+    finish()
+    return nativeEffortMatches(id)
   }
   clickElement(trigger)
-  if (selectNativeEffortItem(id)) {
-    done()
-    return true
-  }
+  waitAndSelectNative(id)
   window.setTimeout(() => {
-    selectNativeEffortItem(id)
-    done()
-  }, 0)
+    syncNativeTriggerLabel(id)
+    finish()
+  }, 80)
   return true
 }
 
 function applyComposerVariant(view: any, id: string | undefined) {
   const next = normalizeEffortId(id)
-  if (view?.setVariant) {
-    const ok = view.setVariant(next)
-    if (ok !== false && (nativeEffortMatches(next) || !findNativeEffortTrigger())) return true
-  }
+  if (view?.setVariant) view.setVariant(next)
   const selected = view?.model?.()
   if (selected?.providerID && selected?.modelID && next !== undefined && view?.setModel) {
-    const ok = view.setModel({
+    view.setModel({
       providerID: selected.providerID,
       modelID: selected.modelID,
       variant: next,
     })
-    if (ok !== false && (nativeEffortMatches(next) || !findNativeEffortTrigger())) return true
   }
-  return applyNativeEffort(next)
+  syncNativeTriggerLabel(next)
+  if (nativeEffortMatches(next)) return true
+  applyNativeEffort(next)
+  syncNativeTriggerLabel(next)
+  return nativeEffortMatches(next)
 }
 
 const HOST_CLASS = "oces-host"
@@ -462,7 +529,7 @@ function Slider(props: { context: any }) {
   const model = () => composer()?.model()
   const current = () => {
     const hold = pending()
-    if (hold !== UNSET) return hold
+    if (hold !== UNSET) return hold ?? "default"
     if (model()) return model()?.variant
     return scrapeEffortLabel()
   }
@@ -539,7 +606,7 @@ function Slider(props: { context: any }) {
     const paint = () => paintNativeEffort(list, id)
     paint()
     const observer = new MutationObserver(paint)
-    observer.observe(document.body, { childList: true, subtree: true })
+    observer.observe(document.body, { childList: true, subtree: true, characterData: true })
     onCleanup(() => observer.disconnect())
   })
 
@@ -553,6 +620,8 @@ function Slider(props: { context: any }) {
     const now = normalizeEffortId(current())
     if (String(next ?? "") === String(now ?? "") && (!persist || nativeEffortMatches(next))) return
     setPending(next)
+    syncNativeTriggerLabel(next)
+    if (composer()?.setVariant) composer()?.setVariant(next)
     if (!persist) return
     if (applyComposerVariant(composer(), next) || nativeEffortMatches(next)) setPending(UNSET)
   }
