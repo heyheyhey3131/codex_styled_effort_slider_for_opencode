@@ -119,8 +119,21 @@ export function valueColorFor(pct, off = false) {
 export function colorForVariant(id, variants = []) {
   if (isOffLevel(id)) return ""
   const list = effortLadder(variants)
-  if (isDefaultLevel(id)) return valueColorFor(pctFromIndex(0, Math.max(1, list.length)), false)
   const incoming = Array.isArray(variants) ? variants.filter((item) => item != null && item !== "" && !isOffLevel(item) && !isDefaultLevel(item)) : []
+  if (isDefaultLevel(id)) {
+    // Without a real ladder, pctFromIndex(0, 1) would jump to the top of the
+    // curve; Default always sits at the first position instead.
+    if (list.length < 2) return valueColorFor(0, false)
+    return valueColorFor(pctFromIndex(0, list.length), false)
+  }
+  if (incoming.length === 0) {
+    // No known ladder (model unresolved): fall back to the canonical rank
+    // curve so tiers keep their blue → violet gradient instead of all
+    // collapsing onto the maximum color.
+    const rank = rankOf(id)
+    if (rank >= 2 && rank <= 6) return valueColorFor((rank - 2) / 4, false)
+    return valueColorFor(1, false)
+  }
   let ladder = list.length ? list : orderVariants(incoming)
   if (currentIndex(ladder, id) < 0) ladder = effortLadder([...incoming, String(id)])
   if (ladder.length === 0) ladder = [String(id)]
@@ -246,36 +259,112 @@ export function pickListedModel(list, selected) {
   return list.find((item) => modelMatches(item, selected))
 }
 
-export function matchModelByLabel(list, label) {
-  const text = String(label ?? "")
+function normalizeLabel(label) {
+  return String(label ?? "")
     .trim()
     .toLowerCase()
     .replace(/…$|\.{2,}$/g, "")
-  if (!text || !Array.isArray(list)) return undefined
-  const exact = list.filter((item) => String(item?.name ?? "").toLowerCase() === text)
-  if (exact.length === 1) return exact[0]
-  const byId = list.filter((item) => identityIds(item, ["id", "modelID"]).some((id) => id.toLowerCase() === text))
+}
+
+function uniqueByStage(list, text, stage) {
+  const hits = list.filter((item) => {
+    const name = String(item?.name ?? "").toLowerCase()
+    if (!name) return false
+    if (stage === "exact") return name === text
+    if (stage === "byId") return identityIds(item, ["id", "modelID"]).some((id) => id.toLowerCase() === text)
+    if (stage === "prefixed") return name.startsWith(text) || (text.startsWith(name) && name.length >= 10)
+    if (stage === "contained") return name.length >= 6 && text.includes(name)
+    return false
+  })
+  return hits.length === 1 ? hits[0] : undefined
+}
+
+function labelParts(label) {
+  const text = String(label ?? "").trim()
+  if (!text.includes("/")) return undefined
+  const parts = text.split("/")
+  const provider = (parts.shift() || "").trim().toLowerCase()
+  const model = parts.join("/").trim().toLowerCase()
+  if (!provider || !model) return undefined
+  return { provider, model }
+}
+
+function providerNamesLookup(providerNames) {
+  if (!providerNames) return undefined
+  if (typeof providerNames.get === "function" && typeof providerNames.has === "function") return providerNames
+  const map = new Map()
+  for (const [key, value] of Object.entries(providerNames || {})) map.set(String(key), String(value ?? ""))
+  return map
+}
+
+function disambiguateByProvider(candidates, providerText, providerNames) {
+  const lookup = providerNamesLookup(providerNames)
+  if (lookup) {
+    const byName = candidates.filter((item) => {
+      const name = String(lookup.get(String(item?.providerID ?? "")) ?? "").trim().toLowerCase()
+      return name !== "" && name === providerText
+    })
+    if (byName.length === 1) return byName[0]
+  }
+  const wantTokens = providerText.split(/[^a-z0-9]+/).filter((token) => token.length >= 3)
+  const byId = candidates.filter((item) => {
+    const pid = String(item?.providerID ?? "").toLowerCase()
+    if (!pid) return false
+    if (providerText.length >= 3 && pid.includes(providerText)) return true
+    const pidTokens = pid.split(/[^a-z0-9]+/).filter(Boolean)
+    return wantTokens.some((token) => pidTokens.includes(token))
+  })
   if (byId.length === 1) return byId[0]
+  return undefined
+}
+
+function candidatesForModelText(list, text) {
+  const exact = list.filter((item) => String(item?.name ?? "").toLowerCase() === text)
+  if (exact.length) return exact
+  const byId = list.filter((item) => identityIds(item, ["id", "modelID"]).some((id) => id.toLowerCase() === text))
+  if (byId.length) return byId
   const prefixed = list.filter((item) => {
     const name = String(item?.name ?? "").toLowerCase()
     if (!name) return false
     return name.startsWith(text) || (text.startsWith(name) && name.length >= 10)
   })
-  if (prefixed.length === 1) return prefixed[0]
-  const contained = list.filter((item) => {
+  if (prefixed.length) return prefixed
+  return list.filter((item) => {
     const name = String(item?.name ?? "").toLowerCase()
     return name.length >= 6 && text.includes(name)
   })
-  if (contained.length === 1) return contained[0]
+}
+
+export function matchModelByLabel(list, label, providerNames) {
+  const text = normalizeLabel(label)
+  if (!text || !Array.isArray(list)) return undefined
+  const direct =
+    uniqueByStage(list, text, "exact") ??
+    uniqueByStage(list, text, "byId") ??
+    uniqueByStage(list, text, "prefixed") ??
+    uniqueByStage(list, text, "contained")
+  if (direct) return direct
+  const parts = labelParts(text)
+  if (!parts) return undefined
+  const candidates = candidatesForModelText(list, parts.model)
+  if (candidates.length === 0) return undefined
+  if (candidates.length === 1) return candidates[0]
+  const byProvider = disambiguateByProvider(candidates, parts.provider, providerNames)
+  if (byProvider) return byProvider
+  // Prefer the longest unique name ("Qwen4 Max Preview" over "Qwen4 Max").
+  const sorted = [...candidates].sort(
+    (a, b) => String(b?.name ?? "").length - String(a?.name ?? "").length,
+  )
+  if (String(sorted[0]?.name ?? "").length !== String(sorted[1]?.name ?? "").length) return sorted[0]
   return undefined
 }
 
-export function matchModelFromLabels(list, labels) {
+export function matchModelFromLabels(list, labels, providerNames) {
   if (!Array.isArray(list) || !Array.isArray(labels)) return undefined
   const hits = []
   const seen = new Set()
   for (const label of labels) {
-    const found = matchModelByLabel(list, label)
+    const found = matchModelByLabel(list, label, providerNames)
     if (!found) continue
     const key = `${found.providerID || ""}::${found.id || found.modelID || ""}`
     if (seen.has(key)) continue

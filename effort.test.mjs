@@ -263,6 +263,35 @@ test("model matching is by provider/model id, not a default ladder or loose name
   assert.equal(matchModelFromLabels(listed, ["HY4 Flash Free", "High"]), hy)
 })
 
+test("composer provider/model labels disambiguate duplicate model names", () => {
+  const deepseekFlash = { providerID: "deepseek", id: "deepseek-flash", name: "DeepSeek V4.1 Flash 1017", variants: ["low", "high", "max"] }
+  const qwenFlash = { providerID: "qianwen-token-plan-personal", id: "deepseek-v4.1-flash-1017", name: "DeepSeek V4.1 Flash 1017", variants: ["low", "medium", "high"] }
+  const qwenMax = { providerID: "qianwen-token-plan-personal", id: "qwen4-max", name: "Qwen4 Max", variants: ["low", "medium", "high"] }
+  const qwenMaxPreview = { providerID: "qianwen-token-plan-personal", id: "qwen4-max-preview", name: "Qwen4 Max Preview", variants: ["low", "medium", "high"] }
+  const listed = [deepseekFlash, qwenFlash, qwenMax, qwenMaxPreview]
+  const providerNames = new Map([
+    ["deepseek", "DeepSeek"],
+    ["qianwen-token-plan-personal", "Qwen"],
+  ])
+  assert.equal(matchModelByLabel(listed, "Qwen / DeepSeek V4.1 Flash 1017", providerNames), qwenFlash)
+  assert.equal(matchModelByLabel(listed, "DeepSeek / DeepSeek V4.1 Flash 1017", providerNames), deepseekFlash)
+  assert.equal(matchModelByLabel(listed, "Qwen / Qwen4 Max Preview", providerNames), qwenMaxPreview)
+  assert.equal(matchModelByLabel(listed, "Qwen / Qwen4 Max", providerNames), qwenMax)
+  assert.equal(matchModelByLabel(listed, "Qwen / Qwen4 Max Preview"), qwenMaxPreview)
+  assert.equal(matchModelByLabel(listed, "Qwen / DeepSeek V4.1 Flash 1017"), undefined)
+  assert.equal(matchModelFromLabels(listed, ["Build", "Qwen / DeepSeek V4.1 Flash 1017", "Default"], providerNames), qwenFlash)
+  assert.equal(matchModelFromLabels(listed, ["Build", "DeepSeek / DeepSeek V4.1 Flash 1017", "Default"], providerNames), deepseekFlash)
+})
+
+test("unknown ladders keep tier colors on the curve instead of all-violet", () => {
+  assert.equal(colorForVariant("default", []), rgbHex(COLOR_BLUE))
+  assert.equal(colorForVariant("low", []), rgbHex(COLOR_BLUE))
+  assert.equal(colorForVariant("max", []), rgbHex(COLOR_TEXT_VIOLET))
+  assert.notEqual(colorForVariant("low", []), colorForVariant("high", []))
+  assert.notEqual(colorForVariant("high", []), colorForVariant("max", []))
+  assert.notEqual(colorForVariant("low", ["low", "high"]), colorForVariant("high", ["low", "high"]))
+})
+
 test("each model's own max is purple, even when missing from another ladder", () => {
   const three = ["low", "medium", "high"]
   const four = ["low", "medium", "high", "xhigh"]

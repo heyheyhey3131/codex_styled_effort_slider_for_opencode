@@ -525,11 +525,29 @@ async function loadModelList(client: any, directory?: string) {
   return unwrapList(await client.model.list(query))
 }
 
-function resolveListedModel(listed: any[], selected?: { providerID?: string; modelID?: string; id?: string }) {
+async function loadProviderNames(client: any, directory?: string) {
+  const names = new Map<string, string>()
+  try {
+    const query = directory ? { location: { directory } } : undefined
+    const res = client?.provider?.list ? await client.provider.list(query) : undefined
+    for (const provider of unwrapList(res)) {
+      if (provider?.id != null) names.set(String(provider.id), String(provider.name ?? provider.id))
+    }
+  } catch {
+    // Provider names are only used to disambiguate label matches.
+  }
+  return names
+}
+
+function resolveListedModel(
+  listed: any[],
+  selected?: { providerID?: string; modelID?: string; id?: string },
+  providerNames?: Map<string, string>,
+) {
   const matched = pickListedModel(listed, selected)
   if (matched) return matched
   if (selected?.modelID) return undefined
-  return matchModelFromLabels(listed, scrapeControlLabels())
+  return matchModelFromLabels(listed, scrapeControlLabels(), providerNames)
 }
 
 function variantIds(model: any) {
@@ -584,7 +602,9 @@ function Slider(props: { context: any }) {
       try {
         const listed = await loadModelList(props.context.client, directory)
         if (cancelled) return
-        const found = resolveListedModel(listed, selected)
+        const providerNames = await loadProviderNames(props.context.client, directory)
+        if (cancelled) return
+        const found = resolveListedModel(listed, selected, providerNames)
         const next = variantIds(found)
         const key = selectionKey(selected) || (found ? `${found.providerID || ""}::${found.id || found.modelID || ""}` : "")
         const modelChanged = Boolean(key && boundKey() && key !== boundKey())
